@@ -11,6 +11,15 @@
       name = "fall";
       runtimeInputs = [ pkgs.git pkgs.openssh ];
       text = ''
+        badusagemsg() {
+          echo -e "\033[31mbad usage\033[90m;\n\n  \033[32mfall --help\033[90m\n\nto get help\033[0m"
+        }
+
+        if [[ $# -gt 1 ]]; then
+          badusagemsg >&2
+          exit 1
+        fi
+
         file="$HOME/.config/fall/repos.conf"
 
         if [[ ! -f "$file" ]]; then
