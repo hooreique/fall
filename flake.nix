@@ -9,7 +9,7 @@
   in {
     packages.default = pkgs.writeShellApplication {
       name = "fall";
-      runtimeInputs = [ pkgs.git ];
+      runtimeInputs = [ pkgs.git pkgs.openssh ];
       text = ''
         file="$HOME/.config/fall/repos.conf"
         if [[ ! -f "$file" ]]; then
