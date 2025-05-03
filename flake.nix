@@ -1,5 +1,5 @@
 {
-  description = "fall for Fetch ALL";
+  description = "Fetch ALL";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   inputs.flake-utils.url = "github:numtide/flake-utils";
@@ -12,8 +12,9 @@
       runtimeInputs = [ pkgs.git pkgs.openssh ];
       text = ''
         file="$HOME/.config/fall/repos.conf"
+
         if [[ ! -f "$file" ]]; then
-          echo -e "$file \033[31mnot found\033[90m; Please make one by \033[32mmkdir -p ~/.config/fall; touch ~/.config/fall/repos.conf\033[0m" >&2
+          echo -e "repos.conf \033[31mnot found\033[90m; Please make one by\n\n  \033[32mmkdir -p ~/.config/fall && touch ~/.config/fall/repos.conf\033[90m\n\nor\n\n  \033[32mfall add\033[90m   This touches repos.conf and adds \$PWD to it.\n\nor\n\n  \033[32mfall edit\033[90m  This touches repos.conf and opens it in \$EDITOR.\033[0m\n" >&2
           exit 1
         fi
 
