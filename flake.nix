@@ -11,15 +11,16 @@
       name = "fall";
       runtimeInputs = [ pkgs.git ];
       text = ''
-        if [[ ! -f "$HOME/repos" ]]; then
-          echo "$HOME/repos not found" >&2
+        file="$HOME/.config/fall/repos.conf"
+        if [[ ! -f "$file" ]]; then
+          echo -e "$file \033[31mnot found\033[90m; Please make one by \033[32mmkdir -p ~/.config/fall; touch ~/.config/fall/repos.conf\033[0m" >&2
           exit 1
         fi
 
-        lines="$(wc --lines < "$HOME/repos")"
+        lines="$(wc --lines < "$file")"
 
         if (( "$lines" >= 100 )); then
-          echo "too big; The repos file has $lines lines. Please make it less than 100." >&2
+          echo -e "\033[31mtoo big\033[90m; The repos.conf file has $lines lines. Please make it less than 100.\033[0m" >&2
           exit 1
         fi
 
@@ -90,7 +91,7 @@
           fi
 
           dirtycheck "$path" &
-        done <<< "$(sed 's/^[[:space:]]*//; s/[[:space:]]*$//' < "$HOME/repos")"
+        done <<< "$(sed 's/^[[:space:]]*//; s/[[:space:]]*$//' < "$file")"
 
         wait
       '';
