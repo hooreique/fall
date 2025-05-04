@@ -19,25 +19,29 @@
         if [[ $# -eq 1 ]] && [[ "$1" == "--help" ]]; then
           echo -e "\033[1mfall\033[0m – \033[1;4mF\033[0metch \033[1;4mALL\033[0m git repositories
 
-        Run without arguments to fetch all repositories listed in \033[34mrepos.conf\033[0m and display
-        their status. Under the hood, it simply loops over each repository and runs \033[33mgit
-        fetch && git status\033[0m. it just makes the process quicker and the output easier to
-        read.
+        Run without arguments to fetch every repository listed in \033[34mrepos.conf\033[0m and display
+        its status. \033[90mUnder the hood,  \033[1mfall\033[0m  \033[90msimply  iterates  over  each  repository  and
+        executes
 
-        \033[1mUsage\033[0m
-          fall            \033[90mDefault command\033[0m
-          fall \033[32m--help\033[0m     Display this help message
-          fall \033[32m--version\033[0m  Print the program version
-          fall \033[36madd\033[0m        Add the current directory to \033[34mrepos.conf\033[90m (creates the file if
+          \033[33mgit fetch && git status\033[90m
+
+        \033[1mfall\033[0m \033[90mjust makes the process quicker and the output easier to read.\033[0m
+
+        \033[1;4mUsage\033[0m
+          \033[1mfall\033[0m            Fetch all repositories
+          \033[1mfall\033[0m \033[36m--help\033[0m     Show this help message
+          \033[1mfall\033[0m \033[36m--version\033[0m  Show the program version
+          \033[1mfall\033[0m \033[32madd\033[0m        Add the current directory to \033[34mrepos.conf\033[0m \033[90m(creates the  file  if
                           it does not exist)\033[0m
-          fall \033[36medit\033[0m       Open \033[34mrepos.conf\033[0m in your \$EDITOR \033[90m(creates the file if it does
+          \033[1mfall\033[0m \033[32medit\033[0m       Open \033[34mrepos.conf\033[0m in your \$EDITOR \033[90m(creates the file if  it  does
                           not exist)\033[0m
-          fall \033[36mprev\033[0m       Print the result of the previous fall with its date and time
-          fall \033[36mshow\033[0m       Display the contents of \033[34mrepos.conf\033[0m
+          \033[1mfall\033[0m \033[32mprev\033[0m       Show the result of previous \033[1mfall\033[0m with datetime
+          \033[1mfall\033[0m \033[32mshow\033[0m       Display the contents of \033[34mrepos.conf\033[0m
 
-        \033[1mFile Locations\033[0m \033[90m- It handles these files, but feel free to edit them yourself.\033[0m
+        \033[1;4mFile locations\033[0m \033[90m– handled automatically, but feel free to edit them yourself\033[0m
           \$HOME/.config/fall/\033[34mrepos.conf\033[0m
           \$HOME/.local/state/fall/prev.txt"
+
           exit 0
         fi
 
