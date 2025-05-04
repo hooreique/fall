@@ -98,7 +98,7 @@ The repo list is located at `~/.config/fall/repos.conf`
 
 ## After Uninstall
 
-You can manually remove these files for a clean system :)
+You can manually remove these directories for a clean system :)
 
 ```sh
 rm -rf ~/.config/fall ~/.local/state/fall
