@@ -7,7 +7,7 @@ multiple git repositories.
 
 ## Features
 
-![./demo.gif](demo.gif)
+<img src="./demo.gif" alt="demo.gif">
 
 - Runs `git fetch` and `git status` on all repos listed in
   `~/.config/fall/repos.conf`.
