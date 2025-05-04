@@ -217,8 +217,8 @@
             elif [[ "$line" =~ $abpattern ]]; then
               stat="$stat \033[90m''${line:12}\033[0m"
             fi
-          done <<< "$(git --git-dir="$1/.git" --work-tree="$1" status \
-            --porcelain=v2 --branch)"
+          done < <(git --git-dir="$1/.git" --work-tree="$1" status \
+            --porcelain=v2 --branch)
 
           if [[ "$stat" == "$before" ]]; then
             stat="$stat \033[32mclean\033[0m"
@@ -254,7 +254,7 @@
           while (( $(jobs -pr | wc --lines) >= 4 )); do
             wait -n
           done
-        done <<< "$(sed 's/^[[:space:]]*//; s/[[:space:]]*$//' < "$file")"
+        done < <(sed 's/^[[:space:]]*//; s/[[:space:]]*$//' < "$file")
 
         wait "''${pids[@]}"
       '';
