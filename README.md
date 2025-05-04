@@ -2,12 +2,12 @@
 
 **_fall_** for _**F**etch **ALL**_;
 
+<img src="./demo.gif" alt="demo.gif">
+
 **_fall_** is a shell script that quickly fetches and shows the status of
 multiple git repositories.
 
 ## Features
-
-<img src="./demo.gif" alt="demo.gif">
 
 - Runs `git fetch` and `git status` on all repos listed in
   `~/.config/fall/repos.conf`.
