@@ -183,6 +183,10 @@
           fi
 
           dirtycheck "$path" &
+
+          while (( $(jobs -pr | wc --lines) >= 4 )); do
+            wait -n
+          done
         done <<< "$(sed 's/^[[:space:]]*//; s/[[:space:]]*$//' < "$file")"
 
         wait
