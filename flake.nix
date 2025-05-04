@@ -12,7 +12,7 @@
       runtimeInputs = [ pkgs.git pkgs.openssh ];
       text = ''
         if [[ $# -gt 1 ]]; then
-          echo -e "\033[31mtoo many args\033[0m\n\n  \033[1mfall --help\033[0m  to get help\n" >&2
+          echo -e "\033[31mtoo many args: $*\033[0m\n\n  \033[1mfall --help\033[0m  to get help\n" >&2
           exit 1
         fi
 
@@ -28,9 +28,11 @@
           fall            \033[90mDefault command\033[0m
           fall \033[32m--help\033[0m     Display this help message
           fall \033[32m--version\033[0m  Print the program version
-          fall \033[36mls\033[0m         List the entries in \033[34mrepos.conf\033[0m
-          fall \033[36madd\033[0m        Append the current directory to \033[34mrepos.conf\033[0m
-          fall \033[36medit\033[0m       Open \033[34mrepos.conf\033[0m in your \$EDITOR
+          fall \033[36mshow\033[0m       Display the contents of \033[34mrepos.conf\033[0m
+          fall \033[36madd\033[0m        Add the current directory to \033[34mrepos.conf\033[90m (creates the file if
+                          it does not exist)\033[0m
+          fall \033[36medit\033[0m       Open \033[34mrepos.conf\033[0m in your \$EDITOR \033[90m(creates the file if it does
+                          not exist)\033[0m
 
         \033[1mConfig Location\033[0m
           \$HOME/.config/fall/\033[34mrepos.conf\033[0m"
@@ -42,18 +44,54 @@
           exit 0
         fi
 
-        if [[ $# -eq 1 ]] && [[ "$1" == "ls" ]]; then
-          echo "ls"
+        file="$HOME/.config/fall/repos.conf"
+
+        if [[ $# -eq 1 ]] && [[ "$1" == "show" ]]; then
+          if [[ ! -f "$file" ]]; then
+            echo -e "\033[31mrepos.conf not found\033[0m\n\n  \033[1mfall --help\033[0m  to get help\n" >&2
+            exit 1
+          fi
+          sed -E "s/^([[:space:]]*#.*)$/$(printf '\033[90m')\1$(printf \
+            '\033[0m')/" < "$file"
           exit 0
         fi
 
+        touch() {
+          local dir="$HOME/.config/fall"
+
+          if [[ -e "$dir" ]] && [[ ! -d "$dir" ]];then
+            echo -e "\033[31m~/.config/fall already exists but it is not a directory\033[0m" >&2
+            return 1
+          fi
+
+          if [[ -e "$file" ]] && [[ ! -f "$file" ]];then
+            echo -e "\033[31mrepos.conf already exists but it is not a file\033[0m" >&2
+            return 1
+          fi
+
+          mkdir -p "$dir"
+
+          if [[ ! -f "$file" ]]; then
+            echo "# Write one path per line. Use absolute paths.
+        # Starting with # means comments.
+        #/path/to/repo
+
+        # You cannot use \$HOME. Use ~ instead.
+        #~/cool stuff
+        " > "$file"
+          fi
+        }
+
         if [[ $# -eq 1 ]] && [[ "$1" == "add" ]]; then
-          echo "add"
+          touch
+          pwd | tee --append "$file"
+          echo -e "\033[90mAdded\033[0m"
           exit 0
         fi
 
         if [[ $# -eq 1 ]] && [[ "$1" == "edit" ]]; then
-          echo "edit"
+          touch
+          "''${EDITOR:-vi}" "$file"
           exit 0
         fi
 
@@ -61,8 +99,6 @@
           echo -e "\033[31munknown option: $1\033[0m\n\n  \033[1mfall --help\033[0m  to get help\n" >&2
           exit 1
         fi
-
-        file="$HOME/.config/fall/repos.conf"
 
         if [[ ! -f "$file" ]]; then
           echo -e "\033[31mrepos.conf not found\033[0m\n\n  \033[1mfall --help\033[0m  to get help\n" >&2
