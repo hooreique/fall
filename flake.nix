@@ -32,12 +32,12 @@
           \033[1mfall\033[0m            Fetch all repositories
           \033[1mfall\033[0m \033[36m--help\033[0m     Show this help message
           \033[1mfall\033[0m \033[36m--version\033[0m  Show the program version
+          \033[1mfall\033[0m \033[32mshow\033[0m       Display the contents of \033[34mrepos.conf\033[0m
           \033[1mfall\033[0m \033[32madd\033[0m        Add the current directory to \033[34mrepos.conf\033[0m \033[90m(creates the  file  if
                           it does not exist)\033[0m
           \033[1mfall\033[0m \033[32medit\033[0m       Open \033[34mrepos.conf\033[0m in your \$EDITOR \033[90m(creates the file if  it  does
                           not exist)\033[0m
           \033[1mfall\033[0m \033[32mprev\033[0m       Show the result of previous \033[1mfall\033[0m with datetime
-          \033[1mfall\033[0m \033[32mshow\033[0m       Display the contents of \033[34mrepos.conf\033[0m
 
         \033[1;4mFile locations\033[0m \033[90m– handled automatically, but feel free to edit them yourself\033[0m
           \$HOME/.config/fall/\033[34mrepos.conf\033[0m
