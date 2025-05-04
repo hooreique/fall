@@ -7,6 +7,8 @@ multiple git repositories.
 
 ## Features
 
+![./demo.gif](demo.gif)
+
 - Runs `git fetch` and `git status` on all repos listed in
   `~/.config/fall/repos.conf`.
 - Uses parallel processing for faster results.
