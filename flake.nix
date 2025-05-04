@@ -112,6 +112,8 @@
           exit 1
         fi
 
+        echo -e "\033[90mfalling... Please wait\033[0m"
+
         dirtycheck() {
           if ! git --git-dir="$1/.git" --work-tree="$1" rev-parse \
             --is-inside-work-tree > /dev/null
