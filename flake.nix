@@ -114,6 +114,8 @@
 
         echo -e "\033[90mfalling... Please wait\033[0m"
 
+        divergeregex='^# branch\.ab '
+
         dirtycheck() {
           if ! git --git-dir="$1/.git" --work-tree="$1" rev-parse \
             --is-inside-work-tree > /dev/null
@@ -150,7 +152,7 @@
               break
             elif [[ "$line" == "# branch.ab +0 -0" ]]; then
               continue
-            elif [[ "$line" =~ ^#\ branch\.ab ]]; then
+            elif [[ "$line" =~ $divergeregex ]]; then
               stat="$stat \033[90m''${line:12}\033[0m"
             fi
           done <<< "$(git --git-dir="$1/.git" --work-tree="$1" status \
