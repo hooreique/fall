@@ -1,6 +1,6 @@
 # fall
 
-**_fall_** for _**F**etch **ALL**_
+**_fall_** for _**F**etch **ALL**_;
 
 **_fall_** is a shell script that quickly fetches and shows the status of
 multiple git repositories.
