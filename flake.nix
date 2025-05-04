@@ -256,7 +256,11 @@
           done
         done < <(sed 's/^[[:space:]]*//; s/[[:space:]]*$//' < "$file")
 
-        wait "''${pids[@]}"
+        if (( ''${#pids[@]} == 0 )); then
+          echo -e "\033[33mThere is no repo to fall into.\033[0m\n\n  \033[1mfall --help\033[0m  to get help\n"
+        else
+          wait "''${pids[@]}"
+        fi
       '';
     };
   });
