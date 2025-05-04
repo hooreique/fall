@@ -9,7 +9,7 @@
   in {
     packages.default = pkgs.writeShellApplication {
       name = "fall";
-      runtimeInputs = with pkgs; [ git uutils-coreutils-noprefix ];
+      runtimeInputs = with pkgs; [ gitMinimal uutils-coreutils-noprefix ];
       text = ''
         if [[ $# -gt 1 ]]; then
           echo -e "\033[31mtoo many args: $*\033[0m\n\n  \033[1mfall --help\033[0m  to get help\n" >&2
