@@ -1,6 +1,6 @@
 # fall
 
-**_fall_** for **_F_**etch **_ALL_**
+**_fall_** for _**F**etch **ALL**_
 
 **_fall_** is a shell script that quickly fetches and shows the status of multiple
 git repositories.
@@ -92,7 +92,7 @@ The repo list is located at `~/.config/fall/repos.conf`
 
 ## After Uninstall
 
-You can manually remove these files as shown below for a clean system :)
+You can manually remove these files for a clean system :)
 
 ```sh
 rm -rf ~/.config/fall ~/.local/state/fall
