@@ -136,7 +136,7 @@
           (( diff <    60 )) && { echo 'just now'; return; }
           (( diff <  3600 )) && { printf '%d minutes ago\n' $(( diff / 60 )); return; }
           (( diff < 21600 )) && { printf '%d hours ago\n' $(( diff / 3600 )); return; }
-          date --reference="$prev" --iso-8601=seconds
+          date --date="@$mtime" --iso-8601=seconds
         }
 
         # handle sub-command "prev"
