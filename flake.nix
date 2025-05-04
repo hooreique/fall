@@ -28,14 +28,16 @@
           fall            \033[90mDefault command\033[0m
           fall \033[32m--help\033[0m     Display this help message
           fall \033[32m--version\033[0m  Print the program version
-          fall \033[36mshow\033[0m       Display the contents of \033[34mrepos.conf\033[0m
           fall \033[36madd\033[0m        Add the current directory to \033[34mrepos.conf\033[90m (creates the file if
                           it does not exist)\033[0m
           fall \033[36medit\033[0m       Open \033[34mrepos.conf\033[0m in your \$EDITOR \033[90m(creates the file if it does
                           not exist)\033[0m
+          fall \033[36mprev\033[0m       Print the result of the previous fall with its date and time
+          fall \033[36mshow\033[0m       Display the contents of \033[34mrepos.conf\033[0m
 
-        \033[1mConfig Location\033[0m
-          \$HOME/.config/fall/\033[34mrepos.conf\033[0m"
+        \033[1mFile Locations\033[0m \033[90m- Feel free to edit these files yourself\033[0m
+          \$HOME/.config/fall/\033[34mrepos.conf\033[0m
+          \$HOME/.local/state/fall/prev.txt"
           exit 0
         fi
 
