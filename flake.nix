@@ -9,13 +9,14 @@
   in {
     packages.default = pkgs.writeShellApplication {
       name = "fall";
-      runtimeInputs = [ pkgs.git pkgs.openssh ];
+      runtimeInputs = with pkgs; [ git openssh uutils-coreutils-noprefix ];
       text = ''
         if [[ $# -gt 1 ]]; then
           echo -e "\033[31mtoo many args: $*\033[0m\n\n  \033[1mfall --help\033[0m  to get help\n" >&2
           exit 1
         fi
 
+        # handle flag "--help"
         if [[ $# -eq 1 ]] && [[ "$1" == "--help" ]]; then
           echo -e "\033[1mfall\033[0m – \033[1;4mF\033[0metch \033[1;4mALL\033[0m git repositories
 
@@ -45,6 +46,7 @@
           exit 0
         fi
 
+        # handle flag "--version"
         if [[ $# -eq 1 ]] && [[ "$1" == "--version" ]]; then
           echo "0.1.0"
           exit 0
@@ -52,6 +54,7 @@
 
         file="$HOME/.config/fall/repos.conf"
 
+        # handle sub-command "show"
         if [[ $# -eq 1 ]] && [[ "$1" == "show" ]]; then
           if [[ ! -f "$file" ]]; then
             echo -e "\033[31mrepos.conf not found\033[0m\n\n  \033[1mfall --help\033[0m  to get help\n" >&2
@@ -88,6 +91,7 @@
           fi
         }
 
+        # handle sub-command "add"
         if [[ $# -eq 1 ]] && [[ "$1" == "add" ]]; then
           touch
           pwd | tee --append "$file"
@@ -95,16 +99,20 @@
           exit 0
         fi
 
+        # handle sub-command "edit"
         if [[ $# -eq 1 ]] && [[ "$1" == "edit" ]]; then
           touch
           "''${EDITOR:-vi}" "$file"
           exit 0
         fi
 
+        # handle all the other argument except "prev"
         if [[ $# -eq 1 ]] && [[ "$1" != "prev" ]] ;then
           echo -e "\033[31munknown option: $1\033[0m\n\n  \033[1mfall --help\033[0m  to get help\n" >&2
           exit 1
         fi
+
+        # At this point, the only remaining unhandled argument is "prev".
 
         prevdir="$HOME/.local/state/fall"
         prev="$prevdir/prev.txt"
@@ -121,16 +129,31 @@
 
         mkdir -p "$prevdir"
 
+        ago() {
+          local mtime diff
+          mtime=$(stat -c %Y "$prev") || return
+          diff=$(( $(date +%s) - mtime ))
+          (( diff <    60 )) && { echo 'just now'; return; }
+          (( diff <  3600 )) && { printf '%d minutes ago\n' $(( diff / 60 )); return; }
+          (( diff < 21600 )) && { printf '%d hours ago\n' $(( diff / 3600 )); return; }
+          date --reference="$prev" --iso-8601=seconds
+        }
+
+        # handle sub-command "prev"
         if [[ $# -eq 1 ]]; then
           if [[ -f "$prev" ]]; then
-            printf '\033[90m%s\033[0m\n' "$(date --reference "$prev")"
+            printf '\033[90m%s\033[0m\n' "$(ago)"
             cat "$prev"
             exit 0
           else
-            echo -e "\033[31m~/.local/state/fall/prev.txt not found\033[90m; This may indicate that you have never executed \033[32mfall\033[90m.\033[0m" >&2
+            echo -e "\033[31m~/.local/state/fall/prev.txt not found\033[90m; This may indicate that you have never executed \033[32mfall\033[90m.\033[0m\n\n  \033[1mfall --help\033[0m  to get help\n" >&2
             exit 1
           fi
         fi
+
+        # No arguments were provided.
+
+        # Beginning default logic
 
         if [[ ! -f "$file" ]]; then
           echo -e "\033[31mrepos.conf not found\033[0m\n\n  \033[1mfall --help\033[0m  to get help\n" >&2
@@ -149,8 +172,10 @@
         exec &> >(tee >(sed --unbuffered --regexp-extended \
           's/\x1B\[[0-9;]*[ -/]*[@-~]//g' > "$prev"))
 
-        divergeregex='^# branch\.ab '
+        abpattern='^# branch\.ab '
 
+        # for each repo
+        # $1 is the path of the repo
         dirtycheck() {
           if ! git --git-dir="$1/.git" --work-tree="$1" rev-parse \
             --is-inside-work-tree > /dev/null
@@ -159,6 +184,7 @@
             return 1
           fi
 
+          # handle "git fetch"
           if ! git --git-dir="$1/.git" --work-tree="$1" fetch; then
             echo -e "$1 \033[31merror occurred\033[90m; Try again later.\033[0m" >&2
             return 1
@@ -181,13 +207,14 @@
 
           local before="$stat"
 
+          # handle "git status"
           while IFS= read -r line; do
             if [[ "$line" =~ ^[^#] ]]; then
               stat="$stat \033[33m±\033[0m"
               break
             elif [[ "$line" == "# branch.ab +0 -0" ]]; then
               continue
-            elif [[ "$line" =~ $divergeregex ]]; then
+            elif [[ "$line" =~ $abpattern ]]; then
               stat="$stat \033[90m''${line:12}\033[0m"
             fi
           done <<< "$(git --git-dir="$1/.git" --work-tree="$1" status \
@@ -202,6 +229,7 @@
 
         pids=()
 
+        # main loop
         while IFS= read -r entry; do
           if [[ -z "$entry" || "$entry" =~ ^# ]]; then
             continue
