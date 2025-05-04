@@ -28,14 +28,16 @@
           fall            \033[90mDefault command\033[0m
           fall \033[32m--help\033[0m     Display this help message
           fall \033[32m--version\033[0m  Print the program version
-          fall \033[36mshow\033[0m       Display the contents of \033[34mrepos.conf\033[0m
           fall \033[36madd\033[0m        Add the current directory to \033[34mrepos.conf\033[90m (creates the file if
                           it does not exist)\033[0m
           fall \033[36medit\033[0m       Open \033[34mrepos.conf\033[0m in your \$EDITOR \033[90m(creates the file if it does
                           not exist)\033[0m
+          fall \033[36mprev\033[0m       Print the result of the previous fall with its date and time
+          fall \033[36mshow\033[0m       Display the contents of \033[34mrepos.conf\033[0m
 
-        \033[1mConfig Location\033[0m
-          \$HOME/.config/fall/\033[34mrepos.conf\033[0m"
+        \033[1mFile Locations\033[0m \033[90m- It handles these files, but feel free to edit them yourself.\033[0m
+          \$HOME/.config/fall/\033[34mrepos.conf\033[0m
+          \$HOME/.local/state/fall/prev.txt"
           exit 0
         fi
 
@@ -95,9 +97,35 @@
           exit 0
         fi
 
-        if [[ $# -eq 1 ]] ;then
+        if [[ $# -eq 1 ]] && [[ "$1" != "prev" ]] ;then
           echo -e "\033[31munknown option: $1\033[0m\n\n  \033[1mfall --help\033[0m  to get help\n" >&2
           exit 1
+        fi
+
+        prevdir="$HOME/.local/state/fall"
+        prev="$prevdir/prev.txt"
+
+        if [[ -e "$prevdir" ]] && [[ ! -d "$prevdir" ]]; then
+          echo -e "\033[31m~/.local/state/fall already exists but it is not a directory\033[0m" >&2
+          exit 1
+        fi
+
+        if [[ -e "$prev" ]] && [[ ! -f "$prev" ]]; then
+          echo -e "\033[31m~/.local/state/fall/prev.txt already exists but it is not a file\033[0m" >&2
+          exit 1
+        fi
+
+        mkdir -p "$prevdir"
+
+        if [[ $# -eq 1 ]]; then
+          if [[ -f "$prev" ]]; then
+            printf '\033[90m%s\033[0m\n' "$(date --reference "$prev")"
+            cat "$prev"
+            exit 0
+          else
+            echo -e "\033[31m~/.local/state/fall/prev.txt not found\033[90m; This may indicate that you have never executed \033[32mfall\033[90m.\033[0m" >&2
+            exit 1
+          fi
         fi
 
         if [[ ! -f "$file" ]]; then
@@ -113,6 +141,9 @@
         fi
 
         echo -e "\033[90mfalling... Please wait\033[0m"
+
+        exec &> >(tee >(sed --unbuffered --regexp-extended \
+          's/\x1B\[[0-9;]*[ -/]*[@-~]//g' > "$prev"))
 
         divergeregex='^# branch\.ab '
 
@@ -165,6 +196,8 @@
           echo -e "$stat"
         }
 
+        pids=()
+
         while IFS= read -r entry; do
           if [[ -z "$entry" || "$entry" =~ ^# ]]; then
             continue
@@ -184,12 +217,14 @@
 
           dirtycheck "$path" &
 
+          pids+=("$!")
+
           while (( $(jobs -pr | wc --lines) >= 4 )); do
             wait -n
           done
         done <<< "$(sed 's/^[[:space:]]*//; s/[[:space:]]*$//' < "$file")"
 
-        wait
+        wait "''${pids[@]}"
       '';
     };
   });
