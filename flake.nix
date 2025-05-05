@@ -93,9 +93,31 @@
 
         # handle sub-command "add"
         if [[ $# -eq 1 ]] && [[ "$1" == "add" ]]; then
+          if [[ "$PWD" == "/" ]]; then
+            echo -e "\033[31mroot(\033[0m/\033[31m) not supported\033[0m" >&2
+            exit 1
+          fi
+
           touch
-          pwd | tee --append "$file"
-          echo -e "\033[90mAdded\033[0m"
+
+          dup=0
+          while IFS= read -r ln; do
+            if [[ -z "$ln" || "$ln" =~ ^# ]]; then
+              continue
+            fi
+
+            if [[ "''${ln/#~\//$HOME/}" == "$PWD" ]]; then
+              dup=1
+              break
+            fi
+          done < <(sed 's/^[[:space:]]*//; s/[[:space:]]*$//' < "$file")
+
+          if (( dup )); then
+            echo -e "$PWD \033[33mduplicate\033[90m; skipping\033[0m"
+          else
+            echo "$PWD" >> "$file"
+            echo -e "$PWD \033[32madded\033[0m"
+          fi
           exit 0
         fi
 
@@ -236,6 +258,16 @@
           fi
 
           path="''${entry/#~\//$HOME/}"
+
+          if [[ "$path" == "/" ]]; then
+            echo -e "\033[31mroot(\033[0m/\033[31m) not supported\033[0m" >&2
+            continue
+          fi
+
+          if [[ "$path" =~ /$ ]];then
+            echo -e "$entry \033[31mtrailing slash(/) not supported\033[0m" >&2
+            continue
+          fi
 
           if [[ "$path" =~ ^[^/] ]];then
             echo -e "$entry \033[31mnot an absolute path\033[90m; Path must start with slash(/) or tilde(~).\033[0m" >&2
