@@ -9,7 +9,24 @@
   in {
     packages.default = pkgs.writeShellApplication {
       name = "fall";
+
       runtimeInputs = with pkgs; [ gitMinimal uutils-coreutils-noprefix ];
+
+      meta = {
+        mainProgram = "fall";
+        description = "Shell helper to fetch and show status of many Git repositories";
+        longDescription = ''
+          **fall — Fetch ALL**
+
+          *fall* runs `git fetch` and `git status` over every repository path
+          listed in `~/.config/fall/repos.conf`, using parallel jobs for speed.
+          It also provides sub‑commands to view, add, or edit that list and to
+          show the results of the previous run.
+        '';
+        homepage = "https://github.com/hooreique/fall";
+        license = pkgs.lib.licenses.mit;
+      };
+
       text = ''
         if [[ $# -gt 1 ]]; then
           echo -e "\033[31mtoo many args: $*\033[0m\n\n  \033[1mfall --help\033[0m  to get help\n" >&2
