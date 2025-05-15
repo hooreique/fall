@@ -103,3 +103,7 @@ You can manually remove these directories for a clean system :)
 ```sh
 rm -rf ~/.config/fall ~/.local/state/fall
 ```
+
+## Contributing
+
+Contributions are welcome.
