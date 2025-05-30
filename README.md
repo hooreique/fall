@@ -10,12 +10,23 @@ multiple git repositories.
 > [!NOTE]
 > Currently, it has only been tested on x86_64-linux.
 
+## Table of Contents
+
+- [Features](#features)
+- [Prerequisites](#prerequisites)
+- [Getting Started](#getting-started)
+- [Usage](#usage)
+- [Config](#config)
+- [After Uninstall](#after-uninstall)
+- [Contributing](#contributing)
+
 ## Features
 
 - Runs `git fetch` and `git status` on all repos listed in
   `~/.config/fall/repos.conf`.
 - Uses parallel processing for faster results.
 - Commands to view, add, or edit the repo list, and to see previous results.
+- Supports _local mode_ (`fall .`) which uses the nearest `.repos.conf`.
 
 ## Prerequisites
 
@@ -77,16 +88,20 @@ You can register your local repository paths in `repos.conf` using either
 ## Usage
 
 ```sh
+# Global mode
 fall       # Fetch all repos and show status
 fall show  # Display the repo list
 fall add   # Add current directory to the repo list
 fall edit  # Edit the repo list
 fall prev  # Show previous run output
+
+# Local mode
+fall .     # Use the nearest .repos.conf
 ```
 
 ## Config
 
-The repo list is located at `~/.config/fall/repos.conf`
+The global repo list is located at `~/.config/fall/repos.conf`
 
 ```plaintext
 # e.g. in your /home/foo/.config/fall/repos.conf
@@ -96,12 +111,22 @@ The repo list is located at `~/.config/fall/repos.conf`
 ~/foo/bar
 ```
 
+You can also create as many local repo lists as you want, wherever you want.
+
+```plaintext
+# e.g. in your ~/example-project/.repos.conf
+path/to/repo
+
+# Note: you should use relative paths, not absolute ones.
+# The paths will be resolved relative to the location of this file.
+```
+
 ## After Uninstall
 
-You can manually remove these directories for a clean system :)
+You can manually remove these files for a clean system :)
 
 ```sh
-rm -rf ~/.config/fall ~/.local/state/fall
+rm ~/.config/fall/repos.conf ~/.local/state/fall/prev.txt
 ```
 
 ## Contributing

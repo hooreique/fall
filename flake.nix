@@ -20,8 +20,8 @@
 
           *fall* runs `git fetch` and `git status` over every repository path
           listed in `~/.config/fall/repos.conf`, using parallel jobs for speed.
-          It also provides sub‑commands to view, add, or edit that list and to
-          show the results of the previous run.
+          With `fall .`, it can instead work from a project-local `.repos.conf`
+          discovered by walking up the directory tree.
         '';
         homepage = "https://github.com/hooreique/fall";
         license = pkgs.lib.licenses.mit;
@@ -55,6 +55,9 @@
           \033[1mfall\033[0m \033[32medit\033[0m       Open \033[34mrepos.conf\033[0m in your \$EDITOR \033[90m(creates the file if  it  does
                           not exist)\033[0m
           \033[1mfall\033[0m \033[32mprev\033[0m       Show the result of previous \033[1mfall\033[0m with datetime
+          \033[1mfall\033[0m \033[32m.\033[0m          Use the nearest \033[35m.repos.conf\033[0m file from  the  current  directory
+                          instead of the global \033[34mrepos.conf\033[0m \033[90m(accepts relative paths, does
+                          not write prev.txt)\033[0m
 
         \033[1;4mFile locations\033[0m \033[90m– handled automatically, but feel free to edit them yourself\033[0m
           \$HOME/.config/fall/\033[34mrepos.conf\033[0m
@@ -65,7 +68,7 @@
 
         # handle flag "--version"
         if [[ $# -eq 1 ]] && [[ "$1" == "--version" ]]; then
-          echo "0.1.0"
+          echo "0.2.0"
           exit 0
         fi
 
@@ -145,6 +148,128 @@
           exit 0
         fi
 
+        abpattern='^# branch\.ab '
+
+        # for each repo
+        # $1 is the path of the repo
+        dirtycheck() {
+          if ! git --git-dir="$1/.git" --work-tree="$1" rev-parse \
+            --is-inside-work-tree > /dev/null
+          then
+            echo -e "$1 \033[31mnot a git repo\033[0m" >&2
+            return 1
+          fi
+
+          # handle "git fetch"
+          if ! git --git-dir="$1/.git" --work-tree="$1" fetch; then
+            echo -e "$1 \033[31merror occurred\033[90m; Try again later.\033[0m" >&2
+            return 1
+          fi
+
+          local stat="$1"
+          local lb
+          local rb
+
+          lb="$(git --git-dir="$1/.git" --work-tree="$1" branch --show-current)"
+          rb="$(git --git-dir="$1/.git" --work-tree="$1" rev-parse \
+            --abbrev-ref --symbolic-full-name '@{upstream}' 2> /dev/null)" \
+            || rb=""
+
+          stat="$stat (\033[34m$lb"
+          if [[ -n "$rb" ]]; then
+            stat="$stat\033[0m,\033[35m$rb"
+          fi
+          stat="$stat\033[0m)"
+
+          local before="$stat"
+
+          # handle "git status"
+          while IFS= read -r line; do
+            if [[ "$line" =~ ^[^#] ]]; then
+              stat="$stat \033[33m±\033[0m"
+              break
+            elif [[ "$line" == "# branch.ab +0 -0" ]]; then
+              continue
+            elif [[ "$line" =~ $abpattern ]]; then
+              stat="$stat \033[90m''${line:12}\033[0m"
+            fi
+          done < <(git --git-dir="$1/.git" --work-tree="$1" status \
+            --porcelain=v2 --branch)
+
+          if [[ "$stat" == "$before" ]]; then
+            stat="$stat \033[32mclean\033[0m"
+          fi
+
+          echo -e "$stat"
+        }
+
+        # handle sub-command "."
+        if [[ $# -eq 1 ]] && [[ "$1" == "." ]]; then
+          dotdir="$PWD"
+
+          while true; do
+            if [[ -f "$dotdir/.repos.conf" ]]; then
+              dotfile="$dotdir/.repos.conf"
+              break;
+            fi
+            if [[ "$dotdir" == "/" ]]; then
+              echo -e "\033[31m.repos.conf not found up to filesystem root\033[90m; To use it, you need to create a .repos.conf file yourself.\033[0m" >&2
+              exit 1
+            fi
+            dotdir="$(dirname "$dotdir")"
+          done
+
+          dotlines="$(wc --lines < "$dotfile")"
+
+          if (( "$dotlines" >= 100 )); then
+            echo -e "\033[31mtoo big\033[90m; The $dotfile file has $dotlines lines. Please make it less than 100.\033[0m" >&2
+            exit 1
+          fi
+
+          echo -e "\033[90mfalling from $dotdir... Please wait\033[0m"
+
+          dotpids=()
+
+          while IFS= read -r rel; do
+            if [[ -z "$rel" || "$rel" =~ ^# ]]; then
+              continue
+            fi
+
+            if [[ "$rel" =~ ^/ || "$rel" =~ ^~/ ]]; then
+              echo -e "$rel \033[31mnot a relative path\033[0m" >&2
+              continue
+            fi
+
+            if [[ "$rel" =~ /$ ]];then
+              echo -e "$rel \033[31mtrailing slash(/) not supported\033[0m" >&2
+              continue
+            fi
+
+            abs="$dotdir/$rel"
+
+            if [[ ! -d "$abs" ]]; then
+              echo -e "$abs \033[31mnot found\033[0m" >&2
+              continue
+            fi
+
+            dirtycheck "$abs" &
+
+            dotpids+=("$!")
+
+            while (( $(jobs -pr | wc -l) >= 4 )); do
+              wait -n;
+            done
+          done < <(sed 's/^[[:space:]]*//; s/[[:space:]]*$//' < "$dotfile")
+
+          if (( ''${#dotpids[@]} == 0 )); then
+            echo -e "\033[33mThere is no repo to fall into.\033[0m\n\n  \033[1mcat '$dotfile'\033[0m  to check the input\n"
+          else
+            wait "''${dotpids[@]}"
+          fi
+
+          exit 0
+        fi
+
         # handle all the other argument except "prev"
         if [[ $# -eq 1 ]] && [[ "$1" != "prev" ]] ;then
           echo -e "\033[31munknown option: $1\033[0m\n\n  \033[1mfall --help\033[0m  to get help\n" >&2
@@ -210,61 +335,6 @@
 
         exec &> >(tee >(sed --unbuffered --regexp-extended \
           's/\x1B\[[0-9;]*[ -/]*[@-~]//g' > "$prev"))
-
-        abpattern='^# branch\.ab '
-
-        # for each repo
-        # $1 is the path of the repo
-        dirtycheck() {
-          if ! git --git-dir="$1/.git" --work-tree="$1" rev-parse \
-            --is-inside-work-tree > /dev/null
-          then
-            echo -e "$1 \033[31mnot a git repo\033[0m" >&2
-            return 1
-          fi
-
-          # handle "git fetch"
-          if ! git --git-dir="$1/.git" --work-tree="$1" fetch; then
-            echo -e "$1 \033[31merror occurred\033[90m; Try again later.\033[0m" >&2
-            return 1
-          fi
-
-          local stat="$1"
-          local lb
-          local rb
-
-          lb="$(git --git-dir="$1/.git" --work-tree="$1" branch --show-current)"
-          rb="$(git --git-dir="$1/.git" --work-tree="$1" rev-parse \
-            --abbrev-ref --symbolic-full-name '@{upstream}' 2> /dev/null)" \
-            || rb=""
-
-          stat="$stat (\033[34m$lb"
-          if [[ -n "$rb" ]]; then
-            stat="$stat\033[0m,\033[35m$rb"
-          fi
-          stat="$stat\033[0m)"
-
-          local before="$stat"
-
-          # handle "git status"
-          while IFS= read -r line; do
-            if [[ "$line" =~ ^[^#] ]]; then
-              stat="$stat \033[33m±\033[0m"
-              break
-            elif [[ "$line" == "# branch.ab +0 -0" ]]; then
-              continue
-            elif [[ "$line" =~ $abpattern ]]; then
-              stat="$stat \033[90m''${line:12}\033[0m"
-            fi
-          done < <(git --git-dir="$1/.git" --work-tree="$1" status \
-            --porcelain=v2 --branch)
-
-          if [[ "$stat" == "$before" ]]; then
-            stat="$stat \033[32mclean\033[0m"
-          fi
-
-          echo -e "$stat"
-        }
 
         pids=()
 
