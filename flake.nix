@@ -10,7 +10,9 @@
     packages.default = pkgs.writeShellApplication {
       name = "fall";
 
-      runtimeInputs = with pkgs; [ gitMinimal uutils-coreutils-noprefix ];
+      runtimeInputs = with pkgs; [
+        gitMinimal  uutils-coreutils-noprefix  gnused
+      ];
 
       meta = {
         mainProgram = "fall";
