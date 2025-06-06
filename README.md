@@ -7,9 +7,6 @@
 **_fall_** is a shell script that quickly fetches and shows the status of
 multiple git repositories.
 
-> [!NOTE]
-> Currently, it has only been tested on x86_64-linux.
-
 ## Table of Contents
 
 - [Features](#features)
