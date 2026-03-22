@@ -8,7 +8,7 @@
     pkgs = inputs.nixpkgs.legacyPackages.${system};
   in {
     packages.default = pkgs.writeShellApplication {
-      name = "fall";
+      name = "fall-0.2.1";
 
       runtimeInputs = with pkgs; [
         gitMinimal  uutils-coreutils-noprefix  gnused
