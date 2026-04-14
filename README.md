@@ -4,7 +4,7 @@
 
 <img src="./demo.gif" alt="demo.gif">
 
-**_fall_** is a shell script that quickly fetches and shows the status of
+**_fall_** is a Nushell program that quickly fetches and shows the status of
 multiple git repositories.
 
 ## Table of Contents
@@ -27,9 +27,11 @@ multiple git repositories.
 
 ## Prerequisites
 
-- `nix` and its experimental features
+- For Nix usage, `nix` and its experimental features
   - `nix command`
   - `flakes`
+- For direct non-Nix usage, `nu` and `git` available on `PATH`
+  - SSH remotes also need an SSH client available to Git
 
 ## Getting Started
 
@@ -39,7 +41,25 @@ You can run `fall` without installing it
 nix run github:hooreique/fall -- --help
 ```
 
-and of course install it by
+You can also run the Nushell script directly without Nix:
+
+```sh
+nu fall.nu --help
+```
+
+Or fetch the script from GitHub and run it immediately:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/hooreique/fall/main/fall.nu \
+  | nu --stdin /dev/stdin -- --help
+```
+
+Direct non-Nix usage intentionally relies on your environment's `nu` and `git`.
+For SSH remotes, it also relies on whatever SSH command your Git uses.
+When installed or run through Nix flakes, `nu`, `git`, and `ssh` are pinned by
+the package.
+
+Install it with:
 
 ```sh
 nix profile install github:hooreique/fall
@@ -56,17 +76,22 @@ or in your flakes
     fall.url = "github:hooreique/fall";
   };
 
-  outputs = inputs: {
-    packages.x86_64-linux.homeConfigurations = {
-      foo = inputs.home-manager.lib.homeManagerConfiguration {
-        pkgs = import inputs.nixpkgs {
-          system = "x86_64-linux";
-          overlays = [
-            (final: prev: { fall = inputs.fall.packages.x86_64-linux.default; })
-          ];
-        };
-        # ...
-      };
+  outputs = inputs: let
+    system = "x86_64-linux";
+    pkgs = import inputs.nixpkgs {
+      inherit system;
+      overlays = [
+        (final: prev: { fall = inputs.fall.packages.${system}.default; })
+      ];
+    };
+  in {
+    homeConfigurations.foo = inputs.home-manager.lib.homeManagerConfiguration {
+      inherit pkgs;
+      modules = [
+        {
+          home.packages = [ pkgs.fall ];
+        }
+      ];
     };
   };
 }
@@ -95,6 +120,8 @@ fall prev  # Show previous run output
 # Local mode
 fall .     # Use the nearest .repos.conf
 ```
+
+For direct non-Nix usage, run the same commands as `nu fall.nu ...`.
 
 ## Config
 
