@@ -1,4 +1,5 @@
 const version = "0.3.0"
+const fetch_start_gap = 100ms
 
 def fail-with-help [message: string] {
   print --stderr $"(ansi red)($message)(ansi reset)\n\n  (ansi attr_bold)fall --help(ansi reset)  to get help\n"
@@ -178,12 +179,19 @@ def dirtycheck [repo: string] {
 
 def run-checks [items: list] {
   $items
-    | par-each --threads 4 { |item|
-        if $item.valid {
+    | enumerate
+    | par-each --keep-order --threads 4 { |entry|
+        let item = $entry.item
+        let events = if $item.valid {
+          if $entry.index < 4 {
+            sleep ($entry.index * $fetch_start_gap)
+          }
           dirtycheck $item.path
         } else {
           $item.events
         }
+        emit $events
+        $events
       }
     | reduce --fold [] { |item, acc| $acc ++ $item }
 }
@@ -339,7 +347,6 @@ def --wrapped main [...raw_args] {
     )
 
     let events = (run-checks $items)
-    emit $events
 
     if (($items | where valid | length) == 0) {
       print $"(ansi yellow)There is no repo to fall into.(ansi reset)\n\n  (ansi attr_bold)cat '($dotfile)'(ansi reset)  to check the input\n"
@@ -407,9 +414,10 @@ def --wrapped main [...raw_args] {
 
   mut events = (run-checks $items)
   if (($items | where valid | length) == 0) {
-    $events = ($events ++ [(event "out" $"(ansi yellow)There is no repo to fall into.(ansi reset)\n\n  (ansi attr_bold)fall --help(ansi reset)  to get help\n")])
+    let no_repo_event = (event "out" $"(ansi yellow)There is no repo to fall into.(ansi reset)\n\n  (ansi attr_bold)fall --help(ansi reset)  to get help\n")
+    emit [$no_repo_event]
+    $events = ($events ++ [$no_repo_event])
   }
 
-  emit $events
   save-prev $prev $events
 }
