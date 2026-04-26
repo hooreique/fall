@@ -22,7 +22,7 @@
         cp "$src" "$out/share/fall/fall.nu"
 
         makeWrapper "${pkgs.nushell}/bin/nu" "$out/bin/fall" \
-          --set PATH "${pkgs.lib.makeBinPath [ pkgs.gitMinimal ]}" \
+          --prefix PATH : "${pkgs.lib.makeBinPath [ pkgs.gitMinimal ]}" \
           --set FALL_GIT_SSH_COMMAND "${pkgs.openssh}/bin/ssh" \
           --add-flags "$out/share/fall/fall.nu"
 
