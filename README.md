@@ -192,19 +192,40 @@ unsupported. Optional mode tolerates only
 fetch failures; configuration, path, and repository validation still applies.
 The existing process exit code policy is unchanged.
 
-Each entry uses `[prefix]path [remote]`, for example `? ~/my\ repo upstream`.
+Each entry uses `[prefix]path [remote [remote-branch]]`, for example `? ~/my\ repo upstream`.
 The optional remote must exactly match one name listed by `git remote` in that
 repository. It is read and written literally, without escaping or unescaping;
 whitespace and backslashes are forbidden. Repeated ASCII spaces between fields
-and trailing separator spaces are allowed. Extra tokens are errors.
+and trailing separator spaces are allowed. A fourth field is a syntax error.
+Fields are strictly positional: `path main` selects remote `main` and fails if
+that remote is unregistered; it never means branch `main`.
+The optional third field is a literal branch name without whitespace or backslashes,
+validated with `git check-ref-format refs/heads/<branch>`.
 
 An explicit remote runs `git fetch -- <remote>`. Multiple remotes, direct URLs,
 and remote groups are unsupported. Omitting the remote preserves the existing
 argument-free `git fetch`, including Git's upstream/default remote selection and
-`fetch.all` setting. Status and ahead/behind counts always use the branch's
-upstream, even when fetching a different remote. Remote validation also applies
+`fetch.all` setting. With no remote-branch, status and ahead/behind counts keep
+using the branch's upstream, even when fetching a different remote. Remote validation also applies
 to `!` and `?` entries, `fall status`, and `fall test`; an unregistered remote is
 a configuration error and that entry is not executed.
+
+With `path origin main`, status compares `HEAD` with
+`refs/remotes/origin/main` using `git rev-list --left-right --count`:
+
+```text
+/project (feature → origin/main) ahead 2, behind 1
+/project (feature → origin/main) up-to-date ±
+```
+
+Counts describe HEAD relative to the selected target, independently of upstream
+settings. `±` indicates working-file changes from porcelain status. Detached HEAD
+is displayed as `HEAD@<short-hash>`. Missing target refs or a HEAD without commits
+produce `comparison unavailable: <reason>`; working-file status and other
+repositories are still processed, without falling back to upstream.
+Fetch policies remain unchanged, including required-fetch failures skipping status.
+Only the standard `refs/remotes/<remote>/<remote-branch>` location is used;
+custom refspec destinations are not discovered automatically.
 
 Paths use a strict codec: escape each ASCII space as `\ `, including repeated,
 leading, and trailing spaces. The first unescaped ASCII space ends the path and
@@ -221,9 +242,10 @@ unsupported. `$HOME` is not expanded.
 `fall test` validates the global config; `fall test .` searches upwards for the
 nearest `.repos.conf` and prints `.repos.conf at: <absolute path>` first.
 Validation checks decoding, path rules, directory existence, and Git repository
-roots, then registered remote names in order, skipping dependent checks on a
+roots, then registered remote names and branch-name validity in order, skipping dependent checks on a
 failed entry but continuing with all remaining entries. Normal repositories and worktrees are accepted;
-repository subdirectories and bare repositories are rejected.
+repository subdirectories and bare repositories are rejected. `fall test` does
+not require the comparison ref or a HEAD commit to exist.
 
 Validation exits **0 only if every entry is valid and the entire file has at
 most 100 lines**; otherwise it exits **1**, including missing or unreadable files.
@@ -236,12 +258,12 @@ Validation never fetches, runs Git status, creates or changes config files, or
 writes `prev.txt`. A missing-directory error includes a conditional reminder
 about escaping spaces; it never retries the whole line as an alternative path.
 `fall add` creates ordinary entries with required fetch and no remote, and checks duplicates using decoded
-paths regardless of fetch mode or remote. Any
+paths regardless of fetch mode, remote, or remote-branch. Any
 existing decoding errors are all reported and prevent adding an entry.
 
 There is no legacy syntax compatibility or automatic migration. Update existing
 space-containing paths to use `\ ` before running `fall`. Suffixes are no longer
-ignored: remove old suffix text or replace it with one registered remote name.
+ignored: remove old suffix text or replace it with a registered remote and optional branch name.
 
 ## Tests
 

@@ -1,7 +1,13 @@
-# Only path ASCII spaces are escaped; the optional remote is kept verbatim.
+# Only path ASCII spaces are escaped; optional remote and branch fields are kept verbatim.
 def validate-remote [remote: string] {
   if ($remote == "") or ($remote | str contains '\') or ($remote =~ '\s') {
     error make {msg: 'remote must be nonempty and cannot contain whitespace or backslash'}
+  }
+}
+
+def validate-branch [branch: string] {
+  if ($branch == "") or ($branch | str contains '\') or ($branch =~ '\s') {
+    error make {msg: 'remote-branch must be nonempty and cannot contain whitespace or backslash'}
   }
 }
 
@@ -22,7 +28,13 @@ export def encode [entry: record<path: string, fetch_mode: string>] {
   let remote = $entry.remote?
   if $remote != null { validate-remote $remote }
   let suffix = if $remote == null { "" } else { ' ' + $remote }
-  $prefix + ($entry.path | str replace --all ' ' '\ ') + $suffix
+  let remote_branch = $entry.remote_branch?
+  if $remote_branch != null {
+    if $remote == null { error make {msg: "remote-branch requires a remote"} }
+    validate-branch $remote_branch
+  }
+  let branch_suffix = if $remote_branch == null { "" } else { ' ' + $remote_branch }
+  $prefix + ($entry.path | str replace --all ' ' '\ ') + $suffix + $branch_suffix
 }
 
 export def decode [text: string] {
@@ -63,8 +75,10 @@ export def decode [text: string] {
   if $path == "" { error make {msg: "empty path"} }
   if ($path | str starts-with '!') or ($path | str starts-with '?') { error make {msg: "path cannot start with ! or ?"} }
   let tokens = ($suffix | split row ' ' | where { |token| $token != "" })
-  if ($tokens | length) > 1 { error make {msg: "expected at most one remote after path; extra tokens are unsupported"} }
+  if ($tokens | length) > 2 { error make {msg: "expected path [remote [remote-branch]]; extra tokens are unsupported"} }
   let remote = if ($tokens | is-empty) { null } else { $tokens | first }
   if $remote != null { validate-remote $remote }
-  {path: $path, fetch_mode: $fetch_mode, remote: $remote}
+  let remote_branch = if ($tokens | length) < 2 { null } else { $tokens | get 1 }
+  if $remote_branch != null { validate-branch $remote_branch }
+  {path: $path, fetch_mode: $fetch_mode, remote: $remote, remote_branch: $remote_branch}
 }
