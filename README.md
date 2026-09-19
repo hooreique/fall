@@ -47,11 +47,14 @@ You can also run the Nushell script directly without Nix:
 nu fall.nu --help
 ```
 
-Or fetch the script from GitHub and run it immediately:
+Or download both scripts into the same directory and run them:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/hooreique/fall/main/fall.nu \
-  | nu --stdin /dev/stdin -- --help
+mkdir -p fall-scripts
+cd fall-scripts
+curl -fsSLO https://raw.githubusercontent.com/hooreique/fall/main/fall.nu
+curl -fsSLO https://raw.githubusercontent.com/hooreique/fall/main/codec.nu
+nu fall.nu --help
 ```
 
 Direct non-Nix usage intentionally relies on your environment's `nu` and `git`.
@@ -116,9 +119,11 @@ fall show  # Display the repo list
 fall add   # Add current directory to the repo list
 fall edit  # Edit the repo list
 fall prev  # Show previous run output
+fall test  # Validate the global config without fetching
 
 # Local mode
 fall .     # Use the nearest .repos.conf
+fall test . # Validate the nearest .repos.conf
 ```
 
 For direct non-Nix usage, run the same commands as `nu fall.nu ...`.
@@ -133,6 +138,7 @@ The global repo list is located at `~/.config/fall/repos.conf`
 
 # You can use ~ for $HOME
 ~/foo/bar
+~/cool\ stuff  optional ignored suffix
 ```
 
 You can also create as many local repo lists as you want, wherever you want.
@@ -144,6 +150,53 @@ path/to/repo
 # Note: you should use relative paths, not absolute ones.
 # The paths will be resolved relative to the location of this file.
 ```
+
+Paths use a strict codec: escape each ASCII space as `\ `, including repeated,
+leading, and trailing spaces. The first unescaped ASCII space ends the path;
+everything after it is ignored. Tabs and quotes are literal path characters,
+not quoting syntax. Backslashes in paths, other escapes, a dangling backslash,
+empty paths, and CR/LF input are errors. Use LF line endings.
+
+Blank or whitespace-only lines and lines whose first non-whitespace character
+is `#` are ignored. Other lines are read exactly as written, without trimming.
+Global entries must be absolute paths (or start with `~/`); local entries must
+be relative to the selected config's directory. `/` and trailing slashes are
+unsupported. `$HOME` is not expanded.
+
+`fall test` validates the global config; `fall test .` searches upwards for the
+nearest `.repos.conf` and prints `.repos.conf at: <absolute path>` first.
+Validation checks decoding, path rules, directory existence, and Git repository
+roots in order, skipping dependent checks on a failed entry but continuing with
+all remaining entries. Normal repositories and worktrees are accepted;
+repository subdirectories and bare repositories are rejected.
+
+Validation exits **0 only if every entry is valid and the entire file has at
+most 100 lines**; otherwise it exits **1**, including missing or unreadable files.
+Blank lines and comments count toward the limit. Even over the limit, all entries
+are checked, with errors showing the filename, line number, original line, and
+reason, followed by checked/succeeded/failed counts. An empty config succeeds.
+Normal execution uses the same 100-line limit and path rules.
+
+Validation never fetches, runs Git status, creates or changes config files, or
+writes `prev.txt`. A missing-directory error includes a conditional reminder
+about escaping spaces; it never retries the whole line as an alternative path.
+`fall add` saves encoded paths and checks duplicates using decoded paths. Any
+existing decoding errors are all reported and prevent adding an entry.
+
+There is no legacy syntax compatibility or automatic migration. Update existing
+space-containing paths to use `\ ` before running `fall`.
+
+## Tests
+
+```sh
+nu codec-test.nu
+python3 cli-test.py
+nix build
+python3 cli-test.py ./result/bin/fall
+```
+
+The CLI suite uses temporary configurations and repositories, including a
+worktree, and checks exit codes, diagnostics, boundaries, and state preservation.
 
 ## After Uninstall
 

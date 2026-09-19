@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+"""Isolated integration spec: python3 cli-test.py [installed-fall]."""
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+SOURCE = Path(__file__).resolve().parent
+COMMAND = [str(Path(sys.argv[1]).resolve())] if len(sys.argv) > 1 else [shutil.which('nu'), str(SOURCE / 'fall.nu')]
+GIT = shutil.which('git')
+
+
+def encode(path):
+    return str(path).replace(' ', '\\ ')
+
+
+with tempfile.TemporaryDirectory(prefix='fall-test-') as temporary:
+    root = Path(temporary)
+    home = root / 'home'
+    home.mkdir()
+    env = {**os.environ, 'HOME': str(home), 'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': '/dev/null'}
+    for key in list(env):
+        if key.startswith('GIT_') and key not in ('GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL'):
+            del env[key]
+    conf = home / '.config/fall/repos.conf'
+    prev = home / '.local/state/fall/prev.txt'
+    calls = root / 'git-calls'
+    bin_dir = root / 'bin'
+    bin_dir.mkdir()
+    # Log every Git invocation to prove test never fetches or runs status.
+    wrapper = bin_dir / 'git'
+    wrapper.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$FALL_TEST_LOG"\nexec "'+GIT+'" "$@"\n')
+    wrapper.chmod(0o755)
+    env.update(PATH=str(bin_dir)+os.pathsep+env['PATH'], FALL_TEST_LOG=str(calls))
+
+    def git(*args):
+        subprocess.run([GIT, *map(str, args)], env=env, check=True, capture_output=True)
+
+    def run(*args, cwd=root, code=0):
+        result = subprocess.run([*COMMAND, *args], cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        output = re.sub(r'\x1b\[[0-9;]*m', '', result.stdout)
+        assert result.returncode == code, (args, result.returncode, output)
+        return output
+
+    def write(content):
+        conf.parent.mkdir(parents=True, exist_ok=True)
+        conf.write_text(content)
+
+    assert 'repos.conf' in run('test', code=1)
+    assert not conf.parent.exists() and not prev.parent.exists()
+    repo = home / '한글 repo  '
+    git('init', repo)
+    git('-C', repo, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-m', 'init')
+    worktree = root / 'work tree'
+    git('-C', repo, 'worktree', 'add', '-b', 'other', worktree)
+    sub = repo / 'sub'
+    sub.mkdir()
+    bare = root / 'bare'
+    git('init', '--bare', bare)
+    nongit = root / 'nongit'
+    nongit.mkdir()
+    write(encode(repo)+' suffix\\unchecked\n'+encode(worktree)+'\n')
+    before = conf.read_bytes()
+    assert 'succeeded: 2, failed: 0' in run('test')
+    assert conf.read_bytes() == before and not prev.parent.exists()
+    prev.parent.mkdir(parents=True)
+    prev.write_text('sentinel')
+    stamp = prev.stat().st_mtime_ns
+    for count in (100, 101):
+        write((encode(repo)+'\n')*count)
+        output = run('test', code=int(count > 100))
+        assert f'Checked: {count}, succeeded: {count}, failed: 0' in output
+        if count == 101:
+            assert f'{conf}:101:' in output and 'line limit exceeded' in output
+    write('# comment\n\n  \t# indented\n'+encode(repo)+'\n'+'bad\\q\nrelative\n/\n'+encode(repo)+'/\n'+encode(root/'absent')+'\n'+encode(sub)+'\n'+encode(bare)+'\n'+encode(nongit)+'\n')
+    output = run('test', code=1)
+    assert 'Checked: 9, succeeded: 1, failed: 8' in output
+    for line in range(5, 13):
+        assert f'{conf}:{line}:' in output
+    assert 'backslash is only allowed' in output and '경로에 공백이 포함되어 있다면' in output
+    assert '[bad\\q]' in output
+    write(('# comment\n'*101)+'bad\\q\n')
+    output = run('test', code=1)
+    assert f'{conf}:102:' in output and 'line limit exceeded' in output
+    write('\n'*100)
+    assert 'file lines: 100' in run('test')
+    write('\n'*101)
+    run('test', code=1)
+    write('')
+    assert 'Checked: 0' in run('test')
+    write(encode(repo)+'\r\n')
+    assert 'CR/LF' in run('test', code=1)
+    # An existing full path with an unescaped space must never be reinterpreted.
+    ambiguous = root/'missing suffix'
+    git('init', ambiguous)
+    write(str(ambiguous)+'\n')
+    assert 'directory not found' in run('test', code=1)
+    # If the prefix exists, only that prefix is validated.
+    git('init', root/'missing')
+    assert 'succeeded: 1' in run('test')
+    project = root / 'project'
+    nested = project / 'nested/deep'
+    nested.mkdir(parents=True)
+    local = project / '.repos.conf'
+    local.write_text(encode(os.path.relpath(repo, project))+'\n')
+    write('invalid global\n')
+    output = run('test', '.', cwd=nested)
+    assert output.splitlines()[0] == f'.repos.conf at: {local}'
+    run('test', cwd=nested, code=1)
+    nearer = nested.parent / '.repos.conf'
+    nearer.write_text('/absolute\n~/home\nrepo/\n')
+    output = run('test', '.', cwd=nested, code=1)
+    assert output.splitlines()[0] == f'.repos.conf at: {nearer}'
+    assert 'failed: 3' in output
+    nearer.unlink()
+    local.unlink()
+    assert '.repos.conf not found' in run('test', '.', cwd=nested, code=1)
+    assert prev.read_text() == 'sentinel' and prev.stat().st_mtime_ns == stamp
+    if calls.exists():
+        assert all(' fetch' not in line and ' status' not in line for line in calls.read_text().splitlines())
+    # add encodes, checks decoded home-expanded paths, and preserves invalid files.
+    write('# comment without final newline')
+    assert 'added' in run('add', cwd=repo)
+    assert conf.read_text() == '# comment without final newline\n'+encode(repo)+'\n'
+    assert 'duplicate' in run('add', cwd=repo)
+    write('~/'+encode(repo.name)+' ignored suffix\n')
+    assert 'duplicate' in run('add', cwd=repo)
+    write('bad\\x\nbad\\\n')
+    before = conf.read_bytes()
+    output = run('add', cwd=repo, code=1)
+    assert f'{conf}:1:' in output and f'{conf}:2:' in output
+    assert conf.read_bytes() == before
+    conf.unlink()
+    run('add', cwd=repo)
+    run('test')
+    if os.geteuid() != 0:
+        conf.chmod(0)
+        try:
+            assert str(conf) in run('test', code=1)
+        finally:
+            conf.chmod(0o600)
+    conf.unlink()
+    conf.mkdir()
+    run('test', code=1)
+    conf.rmdir()
+    # Normal execution uses the same codec and 100/101 boundary.
+    write(encode(repo)+' ignored\n'+'# comment\n'*99)
+    assert 'clean' in run()
+    write(encode(repo)+'\n'+'# comment\n'*100)
+    assert 'maximum is 100' in run(code=1)
+    local.write_text(encode(os.path.relpath(worktree, project))+'\n')
+    before = prev.read_bytes()
+    assert 'clean' in run('.', cwd=nested)
+    assert prev.read_bytes() == before
+    local.write_text(encode(os.path.relpath(worktree, project))+'\n'+'# comment\n'*99)
+    run('test', '.', cwd=nested)
+    assert 'clean' in run('.', cwd=nested)
+    local.write_text('# comment\n'*101)
+    run('test', '.', cwd=nested, code=1)
+    run('.', cwd=nested, code=1)
+print('CLI integration tests passed')
