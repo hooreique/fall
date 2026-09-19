@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Isolated integration spec: python3 cli-test.py [installed-fall]."""
 import os
+import json
 from pathlib import Path
 import re
 import shutil
@@ -28,13 +29,12 @@ with tempfile.TemporaryDirectory(prefix='fall-test-') as temporary:
     conf = home / '.config/fall/repos.conf'
     prev = home / '.local/state/fall/prev.txt'
     calls = root / 'git-calls'
-    bin_dir = root / 'bin'
-    bin_dir.mkdir()
-    # Log every Git invocation to prove test never fetches or runs status.
-    wrapper = bin_dir / 'git'
-    wrapper.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$FALL_TEST_LOG"\nexec "'+GIT+'" "$@"\n')
-    wrapper.chmod(0o755)
-    env.update(PATH=str(bin_dir)+os.pathsep+env['PATH'], FALL_TEST_LOG=str(calls))
+    # Trace2 retains argv (including -C) even when packaged Git overrides PATH.
+    env['GIT_TRACE2_EVENT'] = str(calls)
+
+    def call_log():
+        events = (json.loads(line) for line in calls.read_text().splitlines())
+        return '\n'.join(' '.join(event['argv']) for event in events if event['event'] == 'start')
 
     def git(*args):
         subprocess.run([GIT, *map(str, args)], env=env, check=True, capture_output=True)
@@ -120,7 +120,7 @@ with tempfile.TemporaryDirectory(prefix='fall-test-') as temporary:
     assert '.repos.conf not found' in run('test', '.', cwd=nested, code=1)
     assert prev.read_text() == 'sentinel' and prev.stat().st_mtime_ns == stamp
     if calls.exists():
-        assert all(' fetch' not in line and ' status' not in line for line in calls.read_text().splitlines())
+        assert all(' fetch' not in line and ' status' not in line for line in call_log().splitlines())
     # add encodes, checks decoded home-expanded paths, and preserves invalid files.
     write('# comment without final newline')
     assert 'added' in run('add', cwd=repo)
@@ -161,4 +161,71 @@ with tempfile.TemporaryDirectory(prefix='fall-test-') as temporary:
     local.write_text('# comment\n'*101)
     run('test', '.', cwd=nested, code=1)
     run('.', cwd=nested, code=1)
+
+    # Both status commands check every entry without contacting remotes.
+    # Seed tracking refs so offline ahead/behind reporting is exercised too.
+    git('-C', repo, 'remote', 'add', 'origin', root/'unreachable-remote')
+    git('-C', repo, 'update-ref', 'refs/remotes/origin/tracked', 'HEAD')
+    branch = subprocess.check_output([GIT, '-C', str(repo), 'branch', '--show-current'], env=env, text=True).strip()
+    git('-C', repo, 'config', f'branch.{branch}.remote', 'origin')
+    git('-C', repo, 'config', f'branch.{branch}.merge', 'refs/heads/tracked')
+    git('-C', repo, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-m', 'ahead')
+    write(encode(repo)+'\n!   '+encode(worktree)+' ignored suffix\n')
+    calls.write_text('')
+    output = run('status')
+    log = call_log()
+    assert ' fetch' not in log
+    for path in (repo, worktree):
+        assert any(str(path) in line and ' status --porcelain=v2 --branch' in line for line in log.splitlines()), log
+        assert str(path) in output and str(path) in prev.read_text()
+    assert '+1 -0' in output and 'error occurred' not in output
+    assert '\x1b' not in prev.read_text()
+    assert prev.read_text() in run('prev')
+    before, stamp = prev.read_bytes(), prev.stat().st_mtime_ns
+    local.write_text(encode(os.path.relpath(repo, project))+'\n! '+encode(os.path.relpath(worktree, project))+'\n')
+    write('invalid global\n')
+    calls.write_text('')
+    output = run('status', '.', cwd=nested)
+    log = call_log()
+    assert ' fetch' not in log
+    for path in (repo, worktree):
+        assert any(str(path) in line and ' status --porcelain=v2 --branch' in line for line in log.splitlines()), log
+    assert '+1 -0' in output
+    assert prev.read_bytes() == before and prev.stat().st_mtime_ns == stamp
+    nearer.write_text('! '+encode(os.path.relpath(repo, nearer.parent))+'\n')
+    output = run('status', '.', cwd=nested)
+    assert str(repo) in output and str(worktree) not in output
+    nearer.unlink()
+    local.unlink()
+    run('status', '.', cwd=nested, code=1)
+
+    # A skip entry with an unreachable remote still reports status normally.
+    # Use an independent repository for required fetch (worktrees share remotes).
+    required = root/'required'
+    git('init', required)
+    write('! '+encode(repo)+'\n'+encode(required)+'\n')
+    calls.write_text('')
+    output = run()
+    log = call_log()
+    assert any(str(required) in line and ' fetch' in line for line in log.splitlines()), log
+    assert not any(str(repo) in line and ' fetch' in line for line in log.splitlines()), log
+    for path in (repo, required):
+        assert any(str(path) in line and ' status --porcelain=v2 --branch' in line for line in log.splitlines()), log
+    assert '+1 -0' in output and 'error occurred' not in output
+    write(encode(repo)+'\n')
+    assert 'error occurred' in run()  # Required fetch failure keeps existing policy.
+    write('! ~/'+encode(repo.name)+' ignored\n')
+    assert 'succeeded: 1, failed: 0' in run('test')
+    before = conf.read_bytes()
+    assert 'duplicate' in run('add', cwd=repo)
+    assert conf.read_bytes() == before
+    write('!repo\n!\tbad\n! \n! '+encode(sub)+'\n')
+    assert 'failed: 4' in run('test', code=1)
+    before = conf.read_bytes()
+    run('add', cwd=repo, code=1)
+    assert conf.read_bytes() == before
+    write('# comment\n'*101)
+    run('status', code=1)
+    for args in [('status', 'repo'), ('status', '.', 'extra'), ('.', 'status'), ('status', '--help'), ('unknown',)]:
+        run(*args, code=1)
 print('CLI integration tests passed')
