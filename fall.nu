@@ -122,7 +122,11 @@ def config-items [file: string, config: record, local: bool, root: string, home:
           error make {msg: $"unregistered remote: ($decoded.remote)"}
         }
       }
-      {valid: true, path: $repo, fetch_mode: $decoded.fetch_mode, remote: $decoded.remote, events: []}
+      if $decoded.remote_branch != null {
+        let checked = (^git -C $repo check-ref-format $"refs/heads/($decoded.remote_branch)" | complete)
+        if $checked.exit_code != 0 { error make {msg: $"invalid remote-branch: ($decoded.remote_branch)"} }
+      }
+      {valid: true, path: $repo, fetch_mode: $decoded.fetch_mode, remote: $decoded.remote, remote_branch: $decoded.remote_branch, events: []}
     } catch { |err|
       {valid: false, path: "", events: [(event "err" (diagnostic $file $entry $err.msg))]}
     }
@@ -171,7 +175,7 @@ def ensure-config-file [dir: string, file: string] {
   mkdir $dir
 
   if not (path-is-file $file) {
-    "# Write [prefix]path [remote] per line. Use absolute paths.
+    "# Write [prefix]path [remote [remote-branch]] per line. Use absolute paths.
 # Starting with # means comments.
 #/path/to/repo
 # Prefix a path with ! and ASCII spaces to skip fetch for that repository.
@@ -185,9 +189,11 @@ def ensure-config-file [dir: string, file: string] {
 #~/cool\\ stuff
 # Escape path ASCII spaces with \\ . Optionally append one registered remote name.
 #? ~/my\\ repo upstream
-# Remote names are literal: no whitespace or backslash. Extra tokens are errors.
+# Remote and branch are literal: no whitespace or backslash. A fourth field is an error.
+#? ~/repo origin main
+# With a branch, compare HEAD to refs/remotes/<remote>/<remote-branch>.
 # Suffixes are no longer ignored. Omit remote to keep Git default fetch selection.
-# Remotes are validated even for !, ?, status and test; status uses the upstream.
+# Remotes are validated even for !, ?, status and test; omit branch to use the upstream.
 # Backslashes in paths and CR/LF are unsupported. Run fall test to validate.
 " | save --force $file
   }
@@ -222,7 +228,7 @@ def git-options [] {
   }
 }
 
-def dirtycheck [repo: string, fetch: bool, fetch_mode: string, remote: any] {
+def dirtycheck [repo: string, fetch: bool, fetch_mode: string, remote: any, remote_branch: any] {
   let git_options = (git-options)
 
   let inside = (^git ...$git_options -C $repo rev-parse --is-inside-work-tree | complete)
@@ -246,6 +252,33 @@ def dirtycheck [repo: string, fetch: bool, fetch_mode: string, remote: any] {
   }
 
   let lb = (^git ...$git_options -C $repo branch --show-current | complete | get stdout | str trim)
+  if $remote_branch != null {
+    let head = (^git ...$git_options -C $repo rev-parse --verify 'HEAD^{commit}' | complete)
+    let label = if $lb != "" { $lb } else if $head.exit_code == 0 {
+      let short = (^git ...$git_options -C $repo rev-parse --short HEAD | complete | get stdout | str trim)
+      $"HEAD@($short)"
+    } else { "HEAD" }
+    let target = $"refs/remotes/($remote)/($remote_branch)"
+    let target_commit = (^git ...$git_options -C $repo rev-parse --verify $"($target)^{commit}" | complete)
+    let comparison = if $head.exit_code != 0 {
+      "comparison unavailable: HEAD has no commit"
+    } else if $target_commit.exit_code != 0 {
+      $"comparison unavailable: target ref missing or not a commit: ($target)"
+    } else {
+      let counts = (^git ...$git_options -C $repo rev-list --left-right --count $"HEAD...($target)" -- | complete)
+      if $counts.exit_code != 0 {
+        "comparison unavailable: could not count commits"
+      } else {
+        let parts = ($counts.stdout | str trim | split row --regex '\s+')
+        if $parts == ["0" "0"] { "up-to-date" } else { $"ahead ($parts.0), behind ($parts.1)" }
+      }
+    }
+    let status = (^git ...$git_options -C $repo status --porcelain=v2 --branch | complete)
+    $events = ($events ++ (text-to-events "err" $status.stderr))
+    let dirty = ($status.stdout | lines | any { |line| not ($line | str starts-with "#") })
+    let marker = if $dirty { $" (ansi yellow)±(ansi reset)" } else { "" }
+    return ($events ++ [(event "out" $"($repo) \((ansi blue)($label)(ansi reset) → (ansi magenta)($remote)/($remote_branch)(ansi reset)) ($comparison)($marker)")])
+  }
   let rb_result = (^git ...$git_options -C $repo rev-parse --abbrev-ref --symbolic-full-name "@{upstream}" | complete)
   let rb = if $rb_result.exit_code == 0 { $rb_result.stdout | str trim } else { "" }
 
@@ -296,7 +329,7 @@ def run-checks [items: list, offline: bool] {
     | par-each --keep-order --threads 4 { |item|
         let events = if $item.valid {
           if $item.fetch { sleep $item.delay }
-          dirtycheck $item.path $item.fetch $item.fetch_mode $item.remote
+          dirtycheck $item.path $item.fetch $item.fetch_mode $item.remote $item.remote_branch
         } else {
           $item.events
         }
@@ -353,13 +386,14 @@ Open ($global) in $EDITOR \(default: vi).
 Creates the config file if it does not exist.
 
 (ansi attr_bold)(ansi attr_underline)Config syntax(ansi reset)
-  [prefix]path [remote]
+  [prefix]path [remote [remote-branch]]
   ? ~/my\\ repo upstream
   ! ~/offline-repo
 
 Global paths must be absolute or start with ~/. Escape ASCII spaces with \\ .
 Prefix with ! and ASCII spaces to skip fetch; ? to fetch and show local status on failure.
-An optional registered remote selects what to fetch; status always uses the upstream.
+A registered remote selects what to fetch; an optional branch selects what to compare with HEAD.
+Omit branch to use the upstream. Fields are positional: path main means remote main.
 Blank lines and lines whose first non-whitespace character is # are ignored.
 Maximum: 100 lines including comments. Use ($fall) (ansi green)test(ansi reset) to validate.
 (ansi dark_gray)See README's Config section for all path, prefix, remote, and validation rules.(ansi reset)"
@@ -385,7 +419,7 @@ Show all statuses without fetching, regardless of fetch prefixes.
 Global mode uses ($global) and saves results to ($prev).
 Local mode uses the nearest ($local) and does not save results.
 (ansi dark_gray)Ahead/behind counts use locally stored remote-tracking information, possibly stale.
-Status follows the branch's upstream, even when a different fetch remote is configured.(ansi reset)
+Status compares HEAD to remote/remote-branch when specified; otherwise it uses the upstream.(ansi reset)
 Use ($fall) (ansi green)status .(ansi reset) (ansi cyan)--help(ansi reset) for local path and discovery rules."
     "status ." => $"($usage)
   ($fall) (ansi green)status .(ansi reset)
@@ -395,13 +429,13 @@ Searches from the current directory upwards for the nearest ($local).
 Paths are relative to the directory containing the selected config.
 Does not save results to (ansi blue)prev.txt(ansi reset).
 (ansi dark_gray)Ahead/behind counts use locally stored remote-tracking information, possibly stale.
-Status follows the branch's upstream, even when a different fetch remote is configured.(ansi reset)"
+Status compares HEAD to remote/remote-branch when specified; otherwise it uses the upstream.(ansi reset)"
     "test" => $"($usage)
   ($fall) (ansi green)test(ansi reset)
   ($fall) (ansi green)test .(ansi reset)
 
 Validate ($global); use ($fall) (ansi green)test .(ansi reset) for the nearest ($local).
-Checks syntax, paths, Git repository roots, and registered remote names.
+Checks syntax, paths, Git repository roots, registered remotes, and branch names; target refs need not exist.
 Exit 0: all entries valid and at most 100 lines, including blanks and comments.
 Exit 1: invalid entries, missing/unreadable config, or more than 100 lines.
 Does not fetch, run Git status, or create/change config or state files.
@@ -412,7 +446,7 @@ Use ($fall) (ansi green)test .(ansi reset) (ansi cyan)--help(ansi reset) for loc
 
 Searches from the current directory upwards for the nearest ($local).
 Prints its absolute path first; entry paths are relative to its directory.
-Checks syntax, paths, Git repository roots, and registered remote names.
+Checks syntax, paths, Git repository roots, registered remotes, and branch names; target refs need not exist.
 Exit 0: all entries valid and at most 100 lines, including blanks and comments.
 Exit 1: invalid entries, missing/unreadable config, or more than 100 lines.
 Does not fetch, run Git status, or create/change config or state files.

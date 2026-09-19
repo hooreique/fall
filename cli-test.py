@@ -54,7 +54,7 @@ with tempfile.TemporaryDirectory(prefix='fall-test-') as temporary:
         (): ('Fetch ALL git repositories', 'fall <command> --help', '--version'),
         ('show',): ('Display the contents', '$HOME/.config/fall/repos.conf'),
         ('add',): ('current directory', 'Creates the config', 'Duplicates are skipped'),
-        ('edit',): ('$EDITOR', 'default: vi', '[prefix]path [remote]', '? ~/my\\ repo upstream', "README's Config"),
+        ('edit',): ('$EDITOR', 'default: vi', '[prefix]path [remote [remote-branch]]', '? ~/my\\ repo upstream', "README's Config"),
         ('prev',): ('age or datetime', '$HOME/.local/state/fall/prev.txt'),
         ('.',): ('nearest .repos.conf', 'upwards', 'relative', 'Does not save'),
         ('status',): ('without fetching', 'fall status .', 'saves results', 'possibly stale'),
@@ -409,6 +409,91 @@ with tempfile.TemporaryDirectory(prefix='fall-test-') as temporary:
     assert fetch_argv()[0][-3:] == ['fetch', '--', '--literal']
     assert revision(reachable, f'literal/{branch}') == revision(repo, 'HEAD')
 
+    # Explicit branch comparisons are independent of upstream and fetch selection.
+    comparison = root/'comparison'
+    git('init', '-b', 'feature', comparison)
+    git('-C', comparison, 'remote', 'add', 'origin', remote)
+
+    def commit_comparison(message):
+        git('-C', comparison, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
+            'commit', '--allow-empty', '-m', message)
+
+    def comparison_config(prefix='! ', target='main'):
+        write(prefix+encode(comparison)+' origin '+target+'\n! '+encode(required)+'\n')
+
+    comparison_config()
+    (comparison/'dirty').write_text('untracked')
+    assert 'succeeded: 2, failed: 0' in run('test')
+    output = run('status')
+    assert 'comparison unavailable: HEAD has no commit ±' in output, output
+    assert str(required) in output
+    commit_comparison('base')
+    base = revision(comparison, 'HEAD')
+    git('-C', comparison, 'update-ref', 'refs/remotes/origin/main', base)
+    output = run('status')
+    assert '(feature → origin/main) up-to-date ±' in output, output
+    (comparison/'dirty').unlink()
+    assert '(feature → origin/main) up-to-date' in run('status')
+    commit_comparison('ahead one')
+    commit_comparison('ahead two')
+    assert 'ahead 2, behind 0' in run('status')
+    git('-C', comparison, 'checkout', '-b', 'target', base)
+    commit_comparison('behind one')
+    git('-C', comparison, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
+    git('-C', comparison, 'checkout', 'feature')
+    # Deliberately configure a different upstream with zero divergence.
+    git('-C', comparison, 'update-ref', 'refs/remotes/origin/other', 'HEAD')
+    git('-C', comparison, 'branch', '--set-upstream-to', 'origin/other')
+    output = run('status')
+    assert '(feature → origin/main) ahead 2, behind 1' in output, output
+    assert 'origin/other' not in output
+    assert f'{comparison} (feature → origin/main) ahead 2, behind 1\n' in prev.read_text()
+    assert str(required) in prev.read_text() and '\x1b' not in prev.read_text()
+    calls.write_text('')
+    run()
+    assert not fetch_argv()
+    # Local execution has identical comparison behavior and preserves saved output.
+    local.write_text('! '+encode(os.path.relpath(comparison, project))+' origin main\n')
+    before, stamp = prev.read_bytes(), prev.stat().st_mtime_ns
+    assert 'ahead 2, behind 1' in run('.', cwd=nested)
+    assert 'ahead 2, behind 1' in run('status', '.', cwd=nested)
+    assert prev.read_bytes() == before and prev.stat().st_mtime_ns == stamp
+    git('-C', comparison, 'checkout', '--detach')
+    short = subprocess.check_output([GIT, '-C', str(comparison), 'rev-parse', '--short', 'HEAD'], env=env, text=True).strip()
+    assert f'(HEAD@{short} → origin/main) ahead 2, behind 1' in run('status')
+    comparison_config(target='missing/topic')
+    calls.write_text('')
+    assert 'succeeded: 2, failed: 0' in run('test')
+    assert 'rev-parse --verify' not in call_log() and ' status' not in call_log()
+    (comparison/'dirty').write_text('untracked')
+    output = run('status')
+    assert 'comparison unavailable: target ref missing or not a commit: refs/remotes/origin/missing/topic ±' in output
+    assert str(required) in output and 'ahead' not in output
+    for invalid in ('bad..name', 'bad@{name', '/main', 'main/', 'main.lock', 'a//b', 'a~b', '.'):
+        comparison_config(target=invalid)
+        assert 'invalid remote-branch:' in run('test', code=1)
+    # A local branch name in field two must still be validated as a remote.
+    write(encode(comparison)+' feature\n')
+    assert 'unregistered remote: feature' in run('test', code=1)
+    comparison_config()
+    before = conf.read_bytes()
+    assert 'duplicate' in run('add', cwd=comparison)
+    assert conf.read_bytes() == before
+    # Fetch receives only the remote, never the comparison branch.
+    comparison_config(prefix='')
+    calls.write_text('')
+    run()
+    assert fetch_argv()[0][-3:] == ['fetch', '--', 'origin']
+    git('-C', comparison, 'remote', 'set-url', 'origin', root/'absent-remote')
+    comparison_config(prefix='? ')
+    output = run()
+    assert 'fetch failed; showing local status' in output and 'ahead 2, behind 1' in output
+    assert 'fetch failed; showing local status' in prev.read_text()
+    comparison_config(prefix='')
+    output = run()
+    assert 'error occurred' in output and '→' not in output
+    assert str(required) in output
+
     # Missing remote names are config errors in every mode, including offline/local.
     git('-C', reachable, 'config', 'remotes.group', 'origin upstream')
     for invalid in ('orig', 'Origin', 'group', str(remote)):
@@ -426,7 +511,7 @@ with tempfile.TemporaryDirectory(prefix='fall-test-') as temporary:
                 assert 'fetch failed' not in output
 
     # Old ignored suffixes now fail syntax validation and never execute the row.
-    for suffix in ('origin extra', 'origin\\bad', 'origin\tbad'):
+    for suffix in ('origin main extra', 'origin\\bad', 'origin\tbad'):
         write(encode(reachable)+' '+suffix+'\n')
         calls.write_text('')
         assert 'failed: 1' in run('test', code=1)
