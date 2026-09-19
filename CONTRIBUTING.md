@@ -25,7 +25,7 @@ These guidelines apply to both human and AI-assisted contributions.
 
 ## Where documentation belongs
 
-- [Installation](docs/installation.md): direct script usage, Nix installation,
+- [Installation](docs/installation.md): running from a checkout, Nix installation,
   and the Home Manager flake example.
 - [Configuration reference](docs/configuration.md): repo lists, fetch policies,
   remotes and branches, path codec rules, validation, and migration notes.

@@ -29,7 +29,7 @@ nix profile install github:hooreique/fall
 
 From a checkout, you can also run `nu fall.nu --help` with Nushell and Git on
 `PATH` (plus an SSH client for SSH remotes). See [Installation](docs/installation.md)
-for script downloads and a Home Manager flake example.
+for details and a Home Manager flake example.
 
 Register a repository, then fetch and check your repo list:
 
@@ -56,7 +56,7 @@ fall test .   # Validate the nearest .repos.conf
 ```
 
 Every command supports `--help`, including `fall . --help`.
-For direct script usage, replace `fall` with `nu fall.nu`.
+When running from a checkout, replace `fall` with `nu /path/to/fall/fall.nu`.
 
 Global fetch and status runs save results to `~/.local/state/fall/prev.txt`;
 local runs leave it unchanged. Without a successful fetch, ahead/behind counts

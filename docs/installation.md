@@ -2,15 +2,15 @@
 
 [Back to README](../README.md#getting-started)
 
-## Run without installing
+## Run with Nix without installing
 
-You can run `fall` without installing it
+With Nix (`nix-command` and `flakes` enabled), run `fall` without installing it:
 
 ```sh
 nix run github:hooreique/fall -- --help
 ```
 
-## Run without Nix
+## Run from a checkout
 
 From a checkout, run the Nushell script directly:
 
@@ -18,17 +18,7 @@ From a checkout, run the Nushell script directly:
 nu fall.nu --help
 ```
 
-Or download both scripts into the same directory and run them:
-
-```sh
-mkdir -p fall-scripts
-cd fall-scripts
-curl -fsSLO https://raw.githubusercontent.com/hooreique/fall/main/fall.nu
-curl -fsSLO https://raw.githubusercontent.com/hooreique/fall/main/codec.nu
-nu fall.nu --help
-```
-
-Direct non-Nix usage intentionally relies on your environment's `nu` and `git`.
+Running from a checkout relies on your environment's `nu` and `git`.
 For SSH remotes, it also relies on whatever SSH command your Git uses.
 When installed or run through Nix flakes, `nu`, `git`, and `ssh` are pinned by
 the package.
@@ -74,4 +64,3 @@ Add `fall` to your flake:
   };
 }
 ```
-
