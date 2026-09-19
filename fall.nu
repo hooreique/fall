@@ -114,7 +114,7 @@ def config-items [file: string, config: record, local: bool, root: string, home:
       let decoded = (codec decode $entry.raw)
       let repo = (resolve-repo $decoded.path $local $root $home)
       require-git-root $repo
-      {valid: true, path: $repo, events: []}
+      {valid: true, path: $repo, fetch_mode: $decoded.fetch_mode, events: []}
     } catch { |err|
       {valid: false, path: "", events: [(event "err" (diagnostic $file $entry $err.msg))]}
     }
@@ -166,6 +166,9 @@ def ensure-config-file [dir: string, file: string] {
     "# Write one path per line. Use absolute paths.
 # Starting with # means comments.
 #/path/to/repo
+# Prefix a path with ! and ASCII spaces to skip fetch for that repository.
+#! /path/to/offline-repo
+# fall status skips all fetches; fall status . uses the nearest .repos.conf.
 
 # You cannot use $HOME. Use ~ instead.
 #~/cool\\ stuff
@@ -204,7 +207,7 @@ def git-options [] {
   }
 }
 
-def dirtycheck [repo: string] {
+def dirtycheck [repo: string, fetch: bool] {
   let git_options = (git-options)
 
   let inside = (^git ...$git_options -C $repo rev-parse --is-inside-work-tree | complete)
@@ -212,11 +215,14 @@ def dirtycheck [repo: string] {
     return [(event "err" $"($repo) (ansi red)not a git repo(ansi reset)")]
   }
 
-  let fetch = (^git ...$git_options -C $repo fetch | complete)
-  mut events = ((text-to-events "out" $fetch.stdout) ++ (text-to-events "err" $fetch.stderr))
-  if $fetch.exit_code != 0 {
-    $events = ($events ++ [(event "err" $"($repo) (ansi red)error occurred(ansi dark_gray); Try again later.(ansi reset)")])
-    return $events
+  mut events = []
+  if $fetch {
+    let result = (^git ...$git_options -C $repo fetch | complete)
+    $events = ((text-to-events "out" $result.stdout) ++ (text-to-events "err" $result.stderr))
+    if $result.exit_code != 0 {
+      $events = ($events ++ [(event "err" $"($repo) (ansi red)error occurred(ansi dark_gray); Try again later.(ansi reset)")])
+      return $events
+    }
   }
 
   let lb = (^git ...$git_options -C $repo branch --show-current | complete | get stdout | str trim)
@@ -250,16 +256,26 @@ def dirtycheck [repo: string] {
   $events ++ [(event "out" $stat)]
 }
 
-def run-checks [items: list] {
-  $items
-    | enumerate
-    | par-each --keep-order --threads 4 { |entry|
-        let item = $entry.item
+def run-checks [items: list, offline: bool] {
+  mut fetch_index = 0
+  mut scheduled = []
+  for item in $items {
+    let fetch = if $item.valid {
+      match $item.fetch_mode {
+        "required" => (not $offline)
+        "skip" => false
+        _ => { error make {msg: $"unsupported fetch mode: ($item.fetch_mode)"} }
+      }
+    } else { false }
+    let delay = if $fetch and ($fetch_index < 4) { $fetch_index * $fetch_start_gap } else { 0ms }
+    if $fetch { $fetch_index = $fetch_index + 1 }
+    $scheduled = ($scheduled | append ($item | insert fetch $fetch | insert delay $delay))
+  }
+  $scheduled
+    | par-each --keep-order --threads 4 { |item|
         let events = if $item.valid {
-          if $entry.index < 4 {
-            sleep ($entry.index * $fetch_start_gap)
-          }
-          dirtycheck $item.path
+          if $item.fetch { sleep $item.delay }
+          dirtycheck $item.path $item.fetch
         } else {
           $item.events
         }
@@ -272,7 +288,7 @@ def run-checks [items: list] {
 def help-message [] {
   $"(ansi attr_bold)fall(ansi reset) – (ansi attr_bold)(ansi attr_underline)F(ansi reset)etch (ansi attr_bold)(ansi attr_underline)ALL(ansi reset) git repositories
 
-Run without arguments to fetch every repository listed in (ansi blue)repos.conf(ansi reset) and display
+Run without arguments to fetch enabled repositories in (ansi blue)repos.conf(ansi reset) and display
 its status. (ansi dark_gray)Under the hood,  (ansi attr_bold)fall(ansi reset)  (ansi dark_gray)simply  iterates  over  each  repository  and
 executes
 
@@ -281,7 +297,7 @@ executes
 (ansi attr_bold)fall(ansi reset) (ansi dark_gray)just makes the process quicker and the output easier to read.(ansi reset)
 
 (ansi attr_bold)(ansi attr_underline)Usage(ansi reset)
-  (ansi attr_bold)fall(ansi reset)            Fetch all repositories
+  (ansi attr_bold)fall(ansi reset)            Fetch enabled repositories and show all statuses
   (ansi attr_bold)fall(ansi reset) (ansi cyan)--help(ansi reset)     Show this help message
   (ansi attr_bold)fall(ansi reset) (ansi cyan)--version(ansi reset)  Show the program version
   (ansi attr_bold)fall(ansi reset) (ansi green)show(ansi reset)       Display the contents of (ansi blue)repos.conf(ansi reset)
@@ -296,7 +312,12 @@ executes
 
   fall test       Validate the global config without fetch/status or state changes
   fall test .     Validate the nearest .repos.conf; print its absolute path first
+  fall status     Show all global statuses without fetching; update prev.txt
+  fall status .   Show nearest .repos.conf statuses without fetching or writing prev.txt
 
+Prefix a path with ! and one or more ASCII spaces to skip its fetch in normal runs.
+The separator cannot be a tab. Empty paths and paths starting with ! are unsupported.
+Ahead/behind counts use locally stored remote-tracking information.
 Paths escape ASCII spaces with \\ . The first unescaped space starts an ignored suffix.
 Backslashes in paths and CR/LF are unsupported. Tabs and quotes are literal.
 Blank lines and lines whose first non-whitespace character is # are ignored.
@@ -316,7 +337,7 @@ def --wrapped main [...raw_args] {
     $raw_args
   }
 
-  if (($args | length) > 1) and ($args != ["test" "."]) {
+  if (($args | length) > 1) and ($args != ["test" "."]) and ($args != ["status" "."]) {
     fail-with-help $"too many args: ($args | str join ' ')"
   }
 
@@ -372,7 +393,7 @@ def --wrapped main [...raw_args] {
 
     ensure-config-file $config_dir $file
 
-    let encoded = try { codec encode {path: $cwd} } catch { |err| fail $err.msg }
+    let encoded = try { codec encode {path: $cwd, fetch_mode: "required"} } catch { |err| fail $err.msg }
     let config = try { read-config $file } catch { |err| fail $"($file): ($err.msg)" }
     let decoded = ($config.entries | each { |entry|
       try {
@@ -402,7 +423,8 @@ def --wrapped main [...raw_args] {
     return
   }
 
-  if (($args | length) == 1) and (($args | get 0) == ".") {
+  let offline = (($args | first | default "") == "status")
+  if ($args == ["."]) or ($args == ["status" "."]) {
     let dotfile = try { nearest-config } catch { |err| fail $err.msg }
     let dotroot = ($dotfile | path dirname)
     let config = try { read-config $dotfile } catch { |err| fail $"($dotfile): ($err.msg)" }
@@ -410,7 +432,7 @@ def --wrapped main [...raw_args] {
     print $"(ansi dark_gray)falling from ($dotroot)... Please wait(ansi reset)"
     let items = (config-items $dotfile $config true $dotroot $home)
 
-    let events = (run-checks $items)
+    let events = (run-checks $items $offline)
 
     if (($items | where valid | length) == 0) {
       print $"(ansi yellow)There is no repo to fall into.(ansi reset)\n\n  (ansi attr_bold)cat '($dotfile)'(ansi reset)  to check the input\n"
@@ -418,7 +440,7 @@ def --wrapped main [...raw_args] {
     return
   }
 
-  if (($args | length) == 1) and (($args | get 0) != "prev") {
+  if (($args | length) == 1) and (($args | get 0) != "prev") and not $offline {
     fail-with-help $"unknown option: ($args | get 0)"
   }
 
@@ -435,7 +457,7 @@ def --wrapped main [...raw_args] {
 
   mkdir $prevdir
 
-  if ($args | length) == 1 {
+  if $args == ["prev"] {
     if (path-is-file $prev) {
       print $"(ansi dark_gray)(ago $prev)(ansi reset)"
       print --no-newline (open --raw $prev)
@@ -454,7 +476,7 @@ def --wrapped main [...raw_args] {
   print $"(ansi dark_gray)falling... Please wait(ansi reset)"
   let items = (config-items $file $config false ($file | path dirname) $home)
 
-  mut events = (run-checks $items)
+  mut events = (run-checks $items $offline)
   if (($items | where valid | length) == 0) {
     let no_repo_event = (event "out" $"(ansi yellow)There is no repo to fall into.(ansi reset)\n\n  (ansi attr_bold)fall --help(ansi reset)  to get help\n")
     emit [$no_repo_event]

@@ -24,6 +24,7 @@ multiple git repositories.
 - Uses parallel processing for faster results.
 - Commands to view, add, or edit the repo list, and to see previous results.
 - Supports _local mode_ (`fall .`) which uses the nearest `.repos.conf`.
+- Supports offline status checks and skipping fetch for individual repositories.
 
 ## Prerequisites
 
@@ -114,7 +115,8 @@ You can register your local repository paths in `repos.conf` using either
 
 ```sh
 # Global mode
-fall       # Fetch all repos and show status
+fall       # Fetch enabled repos and show all statuses
+fall status # Show all statuses without fetching; update prev.txt
 fall show  # Display the repo list
 fall add   # Add current directory to the repo list
 fall edit  # Edit the repo list
@@ -124,9 +126,14 @@ fall test  # Validate the global config without fetching
 # Local mode
 fall .     # Use the nearest .repos.conf
 fall test . # Validate the nearest .repos.conf
+fall status . # Show statuses without fetching or changing prev.txt
 ```
 
 For direct non-Nix usage, run the same commands as `nu fall.nu ...`.
+
+`fall status` skips fetch for every entry. Ahead/behind counts use locally stored
+remote-tracking information, which may be stale. Global runs save results to
+`~/.local/state/fall/prev.txt`; local runs leave that file unchanged.
 
 ## Config
 
@@ -139,6 +146,7 @@ The global repo list is located at `~/.config/fall/repos.conf`
 # You can use ~ for $HOME
 ~/foo/bar
 ~/cool\ stuff  optional ignored suffix
+! ~/offline\ repo
 ```
 
 You can also create as many local repo lists as you want, wherever you want.
@@ -150,6 +158,12 @@ path/to/repo
 # Note: you should use relative paths, not absolute ones.
 # The paths will be resolved relative to the location of this file.
 ```
+
+Prefix a line with `! ` to skip fetch for that repository in normal runs while
+still showing its status. `!` must be the first character and followed by one or
+more ASCII spaces; all separator spaces are consumed before decoding the path.
+`!`, `!repo`, and `!` immediately followed by a tab are errors. Empty paths and
+paths beginning with `!` are unsupported. Suffixes are ignored, not remote names.
 
 Paths use a strict codec: escape each ASCII space as `\ `, including repeated,
 leading, and trailing spaces. The first unescaped ASCII space ends the path;
@@ -180,7 +194,8 @@ Normal execution uses the same 100-line limit and path rules.
 Validation never fetches, runs Git status, creates or changes config files, or
 writes `prev.txt`. A missing-directory error includes a conditional reminder
 about escaping spaces; it never retries the whole line as an alternative path.
-`fall add` saves encoded paths and checks duplicates using decoded paths. Any
+`fall add` creates entries with fetch enabled and checks duplicates using decoded
+paths regardless of fetch mode. Any
 existing decoding errors are all reported and prevent adding an entry.
 
 There is no legacy syntax compatibility or automatic migration. Update existing
