@@ -17,7 +17,7 @@
         default = pkgs.stdenvNoCC.mkDerivation {
           pname = "fall";
           version = "0.3.0";
-          src = ./fall.nu;
+          src = ./.;
 
           dontUnpack = true;
           nativeBuildInputs = [ pkgs.makeWrapper ];
@@ -26,7 +26,7 @@
             runHook preInstall
 
             mkdir -p "$out/bin" "$out/share/fall"
-            cp "$src" "$out/share/fall/fall.nu"
+            cp "$src/fall.nu" "$src/codec.nu" "$out/share/fall/"
 
             makeWrapper "${pkgs.nushell}/bin/nu" "$out/bin/fall" \
               --prefix PATH : "${pkgs.lib.makeBinPath [ pkgs.gitMinimal ]}" \

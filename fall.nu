@@ -1,3 +1,5 @@
+use codec.nu
+
 const version = "0.3.0"
 const fetch_start_gap = 100ms
 
@@ -60,14 +62,85 @@ def path-is-file [path: string] {
   }
 }
 
-def trimmed-lines [path: string] {
-  open --raw $path | lines | each { |line| $line | str trim }
+# Split only on LF so the codec can reject CR without losing source text.
+def read-config [file: string] {
+  let raw = (open --raw $file)
+  let rows = if $raw == "" { [] } else {
+    let split = ($raw | split row "\n")
+    if ($raw | str ends-with "\n") { $split | drop } else { $split }
+  }
+  {raw: $raw, count: ($rows | length), entries: ($rows | enumerate | where { |row|
+    let trimmed = ($row.item | str trim)
+    ($trimmed != "") and not ($trimmed | str starts-with "#")
+  } | each { |row| {line: ($row.index + 1), raw: $row.item} })}
 }
 
-def config-entries [path: string] {
-  trimmed-lines $path | where { |line|
-    not (($line == "") or ($line | str starts-with "#"))
+def diagnostic [file: string, entry: record, reason: string] {
+  $"($file):($entry.line): [($entry.raw)]: ($reason)"
+}
+
+def resolve-repo [path: string, local: bool, root: string, home: string] {
+  let expanded = (expand-home $path $home)
+  if $expanded == "/" { error make {msg: "root\(/) not supported"} }
+  if ($path | str ends-with "/") { error make {msg: "trailing slash\(/) not supported"} }
+  if $local and (($path | str starts-with "/") or ($path | str starts-with "~/")) {
+    error make {msg: "not a relative path"}
   }
+  if (not $local) and not ($expanded | str starts-with "/") {
+    error make {msg: "not an absolute path; use / or ~/"}
+  }
+  let repo = if $local { $root | path join $path } else { $expanded }
+  if not (path-is-dir $repo) {
+    error make {msg: ('directory not found: ' + $repo + '. 경로에 공백이 포함되어 있다면 escape되지 않은 공백이 원인일 수 있습니다. 해당하는 경우 공백을 `\ `로 작성하세요.')}
+  }
+  let canonical = ($repo | path expand --strict)
+  if $canonical == "/" { error make {msg: "root\(/) not supported"} }
+  $canonical
+}
+
+def require-git-root [repo: string] {
+  let result = (^git -C $repo rev-parse --show-toplevel | complete)
+  if $result.exit_code != 0 {
+    error make {msg: "not a Git working repository root (bare repositories are unsupported)"}
+  }
+  if (($result.stdout | str replace --regex '\n$' '' | path expand --strict) != $repo) {
+    error make {msg: "not a Git repository root (repository subdirectories are unsupported)"}
+  }
+}
+
+def config-items [file: string, config: record, local: bool, root: string, home: string] {
+  $config.entries | each { |entry|
+    try {
+      let decoded = (codec decode $entry.raw)
+      let repo = (resolve-repo $decoded.path $local $root $home)
+      require-git-root $repo
+      {valid: true, path: $repo, events: []}
+    } catch { |err|
+      {valid: false, path: "", events: [(event "err" (diagnostic $file $entry $err.msg))]}
+    }
+  }
+}
+
+def nearest-config [] {
+  mut dir = (pwd)
+  loop {
+    let candidate = ($dir | path join ".repos.conf")
+    if ($candidate | path exists) { return $candidate }
+    if $dir == "/" { error make {msg: ".repos.conf not found up to filesystem root"} }
+    $dir = ($dir | path dirname)
+  }
+}
+
+def test-config [file: string, local: bool, home: string] {
+  let config = try { read-config $file } catch { |err| fail $"($file): ($err.msg)" }
+  let items = (config-items $file $config $local ($file | path dirname) $home)
+  let failed = ($items | where { |item| not $item.valid } | length)
+  for item in $items { emit $item.events }
+  if $config.count > 100 {
+    print --stderr (diagnostic $file {line: 101, raw: ($config.raw | split row "\n" | get 100)} $"line limit exceeded: ($config.count) lines; maximum is 100")
+  }
+  print $"Checked: ($items | length), succeeded: (($items | length) - $failed), failed: ($failed); file lines: ($config.count)"
+  if ($failed > 0) or ($config.count > 100) { exit 1 }
 }
 
 def expand-home [path: string, home: string] {
@@ -95,7 +168,9 @@ def ensure-config-file [dir: string, file: string] {
 #/path/to/repo
 
 # You cannot use $HOME. Use ~ instead.
-#~/cool stuff
+#~/cool\\ stuff
+# Escape ASCII spaces with \\ . The first unescaped space starts an ignored suffix.
+# Backslashes in paths and CR/LF are unsupported. Run fall test to validate.
 " | save --force $file
   }
 }
@@ -130,24 +205,22 @@ def git-options [] {
 }
 
 def dirtycheck [repo: string] {
-  let git_dir = $"--git-dir=($repo)/.git"
-  let work_tree = $"--work-tree=($repo)"
   let git_options = (git-options)
 
-  let inside = (^git ...$git_options $git_dir $work_tree rev-parse --is-inside-work-tree | complete)
+  let inside = (^git ...$git_options -C $repo rev-parse --is-inside-work-tree | complete)
   if $inside.exit_code != 0 {
     return [(event "err" $"($repo) (ansi red)not a git repo(ansi reset)")]
   }
 
-  let fetch = (^git ...$git_options $git_dir $work_tree fetch | complete)
+  let fetch = (^git ...$git_options -C $repo fetch | complete)
   mut events = ((text-to-events "out" $fetch.stdout) ++ (text-to-events "err" $fetch.stderr))
   if $fetch.exit_code != 0 {
     $events = ($events ++ [(event "err" $"($repo) (ansi red)error occurred(ansi dark_gray); Try again later.(ansi reset)")])
     return $events
   }
 
-  let lb = (^git ...$git_options $git_dir $work_tree branch --show-current | complete | get stdout | str trim)
-  let rb_result = (^git ...$git_options $git_dir $work_tree rev-parse --abbrev-ref --symbolic-full-name "@{upstream}" | complete)
+  let lb = (^git ...$git_options -C $repo branch --show-current | complete | get stdout | str trim)
+  let rb_result = (^git ...$git_options -C $repo rev-parse --abbrev-ref --symbolic-full-name "@{upstream}" | complete)
   let rb = if $rb_result.exit_code == 0 { $rb_result.stdout | str trim } else { "" }
 
   mut stat = $"($repo) \((ansi blue)($lb)"
@@ -157,7 +230,7 @@ def dirtycheck [repo: string] {
   $stat = $"($stat)(ansi reset))"
   let before = $stat
 
-  let status = (^git ...$git_options $git_dir $work_tree status --porcelain=v2 --branch | complete)
+  let status = (^git ...$git_options -C $repo status --porcelain=v2 --branch | complete)
   $events = ($events ++ (text-to-events "err" $status.stderr))
   for line in ($status.stdout | lines) {
     if not ($line | str starts-with "#") {
@@ -221,6 +294,16 @@ executes
                   instead of the global (ansi blue)repos.conf(ansi reset) (ansi dark_gray)\(accepts relative paths, does
                   not write prev.txt)(ansi reset)
 
+  fall test       Validate the global config without fetch/status or state changes
+  fall test .     Validate the nearest .repos.conf; print its absolute path first
+
+Paths escape ASCII spaces with \\ . The first unescaped space starts an ignored suffix.
+Backslashes in paths and CR/LF are unsupported. Tabs and quotes are literal.
+Blank lines and lines whose first non-whitespace character is # are ignored.
+Global paths must be absolute or start with ~/. Local paths are relative to the config.
+Root and trailing slashes are unsupported. Maximum: 100 lines including comments.
+Test succeeds only when all entries are Git roots and the file has at most 100 lines.
+
 (ansi attr_bold)(ansi attr_underline)File locations(ansi reset) (ansi dark_gray)– handled automatically, but feel free to edit them yourself(ansi reset)
   $HOME/.config/fall/(ansi blue)repos.conf(ansi reset)
   $HOME/.local/state/fall/prev.txt"
@@ -233,7 +316,7 @@ def --wrapped main [...raw_args] {
     $raw_args
   }
 
-  if ($args | length) > 1 {
+  if (($args | length) > 1) and ($args != ["test" "."]) {
     fail-with-help $"too many args: ($args | str join ' ')"
   }
 
@@ -250,6 +333,16 @@ def --wrapped main [...raw_args] {
   let home = $env.HOME
   let file = $"($home)/.config/fall/repos.conf"
   let config_dir = $"($home)/.config/fall"
+
+  if (($args | first | default "") == "test") {
+    let local = ($args == ["test" "."])
+    let selected = if $local {
+      try { nearest-config } catch { |err| fail $err.msg }
+    } else { $file }
+    if $local { print $".repos.conf at: ($selected)" }
+    test-config $selected $local $home
+    return
+  }
 
   if (($args | length) == 1) and (($args | get 0) == "show") {
     if not (path-is-file $file) {
@@ -279,15 +372,24 @@ def --wrapped main [...raw_args] {
 
     ensure-config-file $config_dir $file
 
-    let duplicate = (
-      config-entries $file
-        | any { |line| (expand-home $line $home) == $cwd }
-    )
+    let encoded = try { codec encode {path: $cwd} } catch { |err| fail $err.msg }
+    let config = try { read-config $file } catch { |err| fail $"($file): ($err.msg)" }
+    let decoded = ($config.entries | each { |entry|
+      try {
+        {valid: true, path: (codec decode $entry.raw).path}
+      } catch { |err|
+        print --stderr (diagnostic $file $entry $err.msg)
+        {valid: false, path: ""}
+      }
+    })
+    if ($decoded | any { |entry| not $entry.valid }) { exit 1 }
+    let duplicate = ($decoded | any { |entry| (expand-home $entry.path $home) == $cwd })
 
     if $duplicate {
       print $"($cwd) (ansi yellow)duplicate(ansi dark_gray); skipping(ansi reset)"
     } else {
-      $"($cwd)\n" | save --append $file
+      let separator = if ($config.raw != "") and not ($config.raw | str ends-with "\n") { "\n" } else { "" }
+      $"($separator)($encoded)\n" | save --append $file
       print $"($cwd) (ansi green)added(ansi reset)"
     }
     return
@@ -301,50 +403,12 @@ def --wrapped main [...raw_args] {
   }
 
   if (($args | length) == 1) and (($args | get 0) == ".") {
-    mut dotdir = (pwd)
-    mut dotfile = ""
-
-    loop {
-      let candidate = $"($dotdir)/.repos.conf"
-      if (path-is-file $candidate) {
-        $dotfile = $candidate
-        break
-      }
-
-      if $dotdir == "/" {
-        print --stderr $"(ansi red).repos.conf not found up to filesystem root(ansi dark_gray); To use it, you need to create a .repos.conf file yourself.(ansi reset)"
-        exit 1
-      }
-
-      $dotdir = ($dotdir | path dirname)
-    }
-
-    let dotroot = $dotdir
-    let dotlines = (open --raw $dotfile | lines | length)
-    if $dotlines >= 100 {
-      print --stderr $"(ansi red)too big(ansi dark_gray); The ($dotfile) file has ($dotlines) lines. Please make it less than 100.(ansi reset)"
-      exit 1
-    }
-
+    let dotfile = try { nearest-config } catch { |err| fail $err.msg }
+    let dotroot = ($dotfile | path dirname)
+    let config = try { read-config $dotfile } catch { |err| fail $"($dotfile): ($err.msg)" }
+    if $config.count > 100 { fail $"($dotfile): too big; ($config.count) lines, maximum is 100" }
     print $"(ansi dark_gray)falling from ($dotroot)... Please wait(ansi reset)"
-
-    let items = (
-      config-entries $dotfile
-        | each { |rel|
-            if (($rel | str starts-with "/") or ($rel | str starts-with "~/")) {
-              { valid: false, path: "", events: [(event "err" $"($rel) (ansi red)not a relative path(ansi reset)")] }
-            } else if ($rel | str ends-with "/") {
-              { valid: false, path: "", events: [(event "err" $"($rel) (ansi red)trailing slash\(/) not supported(ansi reset)")] }
-            } else {
-              let abs = $"($dotroot)/($rel)"
-              if not (path-is-dir $abs) {
-                { valid: false, path: "", events: [(event "err" $"($abs) (ansi red)not found(ansi reset)")] }
-              } else {
-                { valid: true, path: $abs, events: [] }
-              }
-            }
-          }
-    )
+    let items = (config-items $dotfile $config true $dotroot $home)
 
     let events = (run-checks $items)
 
@@ -385,32 +449,10 @@ def --wrapped main [...raw_args] {
     fail-with-help "repos.conf not found"
   }
 
-  let lines = (open --raw $file | lines | length)
-  if $lines >= 100 {
-    print --stderr $"(ansi red)too big(ansi dark_gray); The repos.conf file has ($lines) lines. Please make it less than 100.(ansi reset)"
-    exit 1
-  }
-
+  let config = try { read-config $file } catch { |err| fail $"($file): ($err.msg)" }
+  if $config.count > 100 { fail $"($file): too big; ($config.count) lines, maximum is 100" }
   print $"(ansi dark_gray)falling... Please wait(ansi reset)"
-
-  let items = (
-    config-entries $file
-      | each { |entry|
-          let repo_path = (expand-home $entry $home)
-
-          if $repo_path == "/" {
-            { valid: false, path: "", events: [(event "err" $"(ansi red)root\((ansi reset)/(ansi red)) not supported(ansi reset)")] }
-          } else if ($repo_path | str ends-with "/") {
-            { valid: false, path: "", events: [(event "err" $"($entry) (ansi red)trailing slash\(/) not supported(ansi reset)")] }
-          } else if not ($repo_path | str starts-with "/") {
-            { valid: false, path: "", events: [(event "err" $"($entry) (ansi red)not an absolute path(ansi dark_gray); Path must start with slash\(/) or tilde\(~).(ansi reset)")] }
-          } else if not (path-is-dir $repo_path) {
-            { valid: false, path: "", events: [(event "err" $"($repo_path) (ansi red)not found(ansi reset)")] }
-          } else {
-            { valid: true, path: $repo_path, events: [] }
-          }
-        }
-  )
+  let items = (config-items $file $config false ($file | path dirname) $home)
 
   mut events = (run-checks $items)
   if (($items | where valid | length) == 0) {
