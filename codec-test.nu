@@ -4,19 +4,29 @@ use std/assert
 
 for path in ['/repo' '/한글/저장소' 'a  b' ' leading' 'trailing ' '  both  ' ' ' "tab\tpath" '"quoted"'] {
   for mode in [required skip optional] {
-    let entry = {path: $path, fetch_mode: $mode}
+    let entry = {path: $path, fetch_mode: $mode, remote: null}
     assert equal (codec decode (codec encode $entry)) $entry
   }
 }
 assert equal (codec encode {path: 'a  b', fetch_mode: required}) 'a\ \ b'
 assert equal (codec encode {path: 'a b', fetch_mode: skip}) '! a\ b'
 assert equal (codec encode {path: 'a b', fetch_mode: optional}) '? a\ b'
-assert equal (codec decode '?   a\ b suffix\ignored\') {path: 'a b', fetch_mode: optional}
-assert equal (codec decode '?  \ leading') {path: ' leading', fetch_mode: optional}
-assert equal (codec decode 'repo suffix\ignored\') {path: 'repo', fetch_mode: required}
-assert equal (codec decode 'a\ b ignored') {path: 'a b', fetch_mode: required}
-assert equal (codec decode '!   a\ b suffix\ignored\') {path: 'a b', fetch_mode: skip}
-assert equal (codec decode '!  \ leading') {path: ' leading', fetch_mode: skip}
+for mode in [required skip optional] {
+  for remote in [null origin upstream '한글' '"quoted"' '-option' 'a/b' '?name'] {
+    let entry = {path: ' a  b ', fetch_mode: $mode, remote: $remote}
+    assert equal (codec decode (codec encode $entry)) $entry
+  }
+}
+assert equal (codec decode '?   a\ b   upstream   ') {path: 'a b', fetch_mode: optional, remote: upstream}
+assert equal (codec decode '!  \ leading   ') {path: ' leading', fetch_mode: skip, remote: null}
+assert equal (codec decode 'repo   ') {path: repo, fetch_mode: required, remote: null}
+assert equal (codec decode 'repo "quoted"') {path: repo, fetch_mode: required, remote: '"quoted"'}
+for remote in ['' 'a b' 'a\b' "a\tb" "a\nb" "a\rb" 'a b'] {
+  assert error { codec encode {path: repo, fetch_mode: required, remote: $remote} }
+}
+for input in ['repo origin extra' 'repo suffix\ignored\' 'repo remote\ name' "repo a\tb" 'repo a b'] {
+  assert error { codec decode $input }
+}
 for input in ['' ' suffix' 'a\q' 'a\' 'a\\b' "a\r" "a\n" "a suffix\r" "a suffix\n" '!' '!repo' "!\trepo" '! ' '!    ' '! !repo' ' ! repo'] {
   assert error { codec decode $input }
 }
