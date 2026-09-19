@@ -13,6 +13,16 @@
         );
     in
     {
+      devShells = forAllSys (pkgs: {
+        default = pkgs.mkShell {
+          packages = [
+            pkgs.nushell
+            pkgs.python3
+            pkgs.gitMinimal
+          ];
+        };
+      });
+
       packages = forAllSys (pkgs: {
         default = pkgs.stdenvNoCC.mkDerivation {
           pname = "fall";

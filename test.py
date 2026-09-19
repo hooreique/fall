@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Isolated integration spec: python3 cli-test.py [installed-fall]."""
+"""Isolated integration spec: python3 test.py [installed-fall]."""
 import os
 import json
 from pathlib import Path

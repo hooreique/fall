@@ -282,15 +282,21 @@ ignored: remove old suffix text or replace it with a registered remote and optio
 
 ## Tests
 
+The development shell provides Nushell, Python, and Git pinned by `flake.lock`.
+
 ```sh
-nu codec-test.nu
-nix shell --inputs-from . nixpkgs#python3 -c python3 cli-test.py
+nix develop -c nu codec-test.nu
+nix develop -c python3 test.py
 nix build
-nix shell --inputs-from . nixpkgs#python3 -c python3 cli-test.py ./result/bin/fall
+nix develop -c python3 test.py ./result/bin/fall
 ```
 
 The CLI suite uses temporary configurations and repositories, including a
 worktree, and checks exit codes, diagnostics, boundaries, and state preservation.
+Without an argument, `test.py` runs `fall.nu` with Nushell from PATH; with an
+executable path, it tests that executable instead. Pull request CI builds the
+package and tests `result/bin/fall` once on each supported system
+(`x86_64-linux`, `aarch64-linux`, and `aarch64-darwin`).
 
 ## After Uninstall
 
