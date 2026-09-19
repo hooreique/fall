@@ -130,6 +130,20 @@ fall test . # Validate the nearest .repos.conf
 fall status . # Show statuses without fetching or changing prev.txt
 ```
 
+Start with the command overview, then open help for the command or mode you need:
+
+```sh
+fall --help           # Brief overview of commands and options
+fall edit --help      # Editor behavior and core config syntax
+fall status --help    # Global and local status modes
+fall status . --help  # Only local status behavior
+fall test . --help    # Only local validation behavior
+```
+
+Every command supports `--help`, including `fall . --help`. Help works without
+config files or Git repositories and does not create or change files.
+See [Config](#config) for the complete configuration rules.
+
 For direct non-Nix usage, run the same commands as `nu fall.nu ...`.
 
 `fall status` skips fetch for every entry. Ahead/behind counts use locally stored
