@@ -2,7 +2,7 @@
 use codec.nu
 use std/assert
 
-for path in ['/repo' '/한글/저장소' 'a  b' ' leading' 'trailing ' '  both  ' ' ' "tab\tpath" '"quoted"'] {
+for path in ['/repo' '/한글/저장소' 'a  b' ' leading' 'trailing ' '  both  ' ' ' "tab\tpath" '"quoted"' 'repo#1'] {
   for mode in [required skip optional] {
     let entry = {path: $path, fetch_mode: $mode, remote: null, remote_branch: null}
     assert equal (codec decode (codec encode $entry)) $entry
@@ -12,7 +12,7 @@ assert equal (codec encode {path: 'a  b', fetch_mode: required}) 'a\ \ b'
 assert equal (codec encode {path: 'a b', fetch_mode: skip}) '! a\ b'
 assert equal (codec encode {path: 'a b', fetch_mode: optional}) '? a\ b'
 for mode in [required skip optional] {
-  for remote in [null origin upstream '한글' '"quoted"' '-option' 'a/b' '?name'] {
+  for remote in [null origin upstream '한글' '"quoted"' '-option' 'a/b' '?name' 'origin#1'] {
     let entry = {path: ' a  b ', fetch_mode: $mode, remote: $remote, remote_branch: null}
     assert equal (codec decode (codec encode $entry)) $entry
   }
@@ -43,7 +43,7 @@ for mode in [unknown ''] {
 }
 
 for mode in [required skip optional] {
-  for branch in [main feature/topic 한글] {
+  for branch in [main feature/topic 한글 main#1] {
     let entry = {path: 'a b', fetch_mode: $mode, remote: origin, remote_branch: $branch}
     assert equal (codec decode (codec encode $entry)) $entry
   }
@@ -57,5 +57,22 @@ for branch in ['' 'a b' 'a\b' "a\tb"] {
 }
 for input in ['repo origin a\b' "repo origin a\tb"] {
   assert error { codec decode $input }
+}
+# Comments begin only at suffix token boundaries, before field validation.
+for mode in [required skip optional] {
+  for suffix in ['' ' origin' ' origin main'] {
+    let prefix = match $mode { required => '', skip => '!   ', optional => '?  ' }
+    let row = $prefix + 'repo\ with\ spaces#1' + $suffix
+    for comment in ['#' '#설명' '# 설명' "# bad\\field\tmore extra tokens"] {
+      assert equal (codec decode ($row + '   ' + $comment)) (codec decode $row)
+    }
+  }
+}
+for input in ['repo origin main extra # comment' 'repo bad\remote # comment' "repo origin bad\tbranch # comment" 'bad\path # comment' "repo origin\t#comment" "repo # comment\r" "repo # comment\n"] {
+  assert error { codec decode $input }
+}
+for value in ['#' '#설명'] {
+  assert error { codec encode {path: repo, fetch_mode: required, remote: $value} }
+  assert error { codec encode {path: repo, fetch_mode: required, remote: origin, remote_branch: $value} }
 }
 print 'codec tests passed'

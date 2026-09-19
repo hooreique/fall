@@ -208,6 +208,8 @@ with tempfile.TemporaryDirectory(prefix='fall-test-') as temporary:
     conf.unlink()
     run('add', cwd=repo)
     assert '#? /path/to/' in conf.read_text()
+    assert '#/path/to/repo origin main # description' in conf.read_text()
+    assert 'a token starting with #' in run('edit', '--help')
     assert '? to fetch' in run('edit', '--help')
     run('test')
     if os.geteuid() != 0:
@@ -351,6 +353,43 @@ with tempfile.TemporaryDirectory(prefix='fall-test-') as temporary:
     def fetch_argv():
         return [event['argv'] for event in map(json.loads, calls.read_text().splitlines())
                 if event['event'] == 'start' and 'fetch' in event['argv']]
+
+    # Inline comments share decoding across validation, execution, and add.
+    for prefix in ('', '! ', '? '):
+        for suffix in ('', ' origin', f' origin {branch}'):
+            comment = '   #설명 bad\\field\t extra ignored tokens'
+            raw = prefix+encode(reachable)+suffix+comment
+            local_raw = prefix+encode(os.path.relpath(reachable, project))+suffix+comment
+            write('# heading\n'+raw+'\n')
+            local.write_text('# heading\n'+local_raw+'\n')
+            global_before, local_before = conf.read_bytes(), local.read_bytes()
+            for args in (('test',), ('test', '.')):
+                assert 'succeeded: 1, failed: 0' in run(*args, cwd=nested)
+            for args in ((), ('.',)):
+                calls.write_text('')
+                output = run(*args, cwd=nested)
+                assert str(reachable) in output and 'error occurred' not in output
+                argv = fetch_argv()
+                if prefix == '! ':
+                    assert not argv, argv
+                else:
+                    expected = ['fetch', '--', 'origin'] if suffix else ['fetch']
+                    assert len(argv) == 1 and argv[0][-len(expected):] == expected, argv
+            assert 'duplicate' in run('add', cwd=reachable)
+            assert conf.read_bytes() == global_before and local.read_bytes() == local_before
+
+    # Errors retain their original line and comment in both config diagnostics.
+    for suffix in ('origin main extra', 'origin\\bad', 'origin\tbad'):
+        raw = encode(reachable)+' '+suffix+' # retained comment'
+        local_raw = encode(os.path.relpath(reachable, project))+' '+suffix+' # retained comment'
+        write('# heading\n'+raw+'\n')
+        local.write_text('# heading\n'+local_raw+'\n')
+        for args, selected, original in ((('test',), conf, raw), (('test', '.'), local, local_raw)):
+            output = run(*args, cwd=nested, code=1)
+            assert f'{selected}:2: [{original}]' in output, output
+        before = conf.read_bytes()
+        run('add', cwd=reachable, code=1)
+        assert conf.read_bytes() == before
 
     stale = revision(reachable, f'upstream/{branch}')
     git('-C', repo, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
