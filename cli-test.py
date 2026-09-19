@@ -49,6 +49,78 @@ with tempfile.TemporaryDirectory(prefix='fall-test-') as temporary:
         conf.parent.mkdir(parents=True, exist_ok=True)
         conf.write_text(content)
 
+    # Every help route is read-only, even with absent or malformed configs.
+    help_cases = {
+        (): ('Fetch ALL git repositories', 'fall <command> --help', '--version'),
+        ('show',): ('Display the contents', '$HOME/.config/fall/repos.conf'),
+        ('add',): ('current directory', 'Creates the config', 'Duplicates are skipped'),
+        ('edit',): ('$EDITOR', 'default: vi', '[prefix]path [remote]', '? ~/my\\ repo upstream', "README's Config"),
+        ('prev',): ('age or datetime', '$HOME/.local/state/fall/prev.txt'),
+        ('.',): ('nearest .repos.conf', 'upwards', 'relative', 'Does not save'),
+        ('status',): ('without fetching', 'fall status .', 'saves results', 'possibly stale'),
+        ('status', '.'): ('without fetching', 'nearest .repos.conf', 'relative', 'Does not save', 'possibly stale'),
+        ('test',): ('Git repository roots', 'fall test .', 'Exit 0', 'Exit 1', '100 lines', 'config or state files'),
+        ('test', '.'): ('absolute path first', 'relative', 'Exit 0', 'Exit 1', '100 lines', 'config or state files'),
+    }
+    with tempfile.TemporaryDirectory(prefix='fall-help-') as help_temporary:
+        help_root = Path(help_temporary)
+        help_home = help_root / 'home'
+        help_home.mkdir()
+        help_cwd = help_root / 'project/nested'
+        help_cwd.mkdir(parents=True)
+        editor = help_root / 'editor'
+        editor.write_text('#!/bin/sh\necho invoked > "' + str(help_root / 'editor-called') + '"\n')
+        editor.chmod(0o755)
+        saved_env = env.copy()
+        env.update(HOME=str(help_home), EDITOR=str(editor), GIT_TRACE2_EVENT=str(help_root / 'git-calls'))
+
+        def snapshot():
+            return {str(p.relative_to(help_root)): (p.stat().st_mtime_ns, p.read_bytes() if p.is_file() else None)
+                    for p in help_root.rglob('*')}
+
+        for malformed in (False, True):
+            if malformed:
+                bad_conf = help_home / '.config/fall/repos.conf'
+                bad_conf.parent.mkdir(parents=True)
+                bad_conf.write_text('bad\\q\n')
+                (help_cwd.parent / '.repos.conf').write_text('bad\\q\n')
+                state = help_home / '.local/state/fall/prev.txt'
+                state.parent.mkdir(parents=True)
+                state.write_text('saved result')
+            before = snapshot()
+            for topic, expected in help_cases.items():
+                for leading in ((), ('--',)):
+                    result = run(*leading, *topic, '--help', cwd=help_cwd, streams=True)
+                    assert result.stderr == '', (topic, result.stderr)
+                    plain = re.sub(r'\x1b\[[0-9;]*m', '', result.stdout)
+                    assert all(part in plain for part in expected), (topic, plain)
+                    assert len(plain.splitlines()) <= (25 if not topic or topic == ('edit',) else 15), plain
+                    assert max(map(len, plain.splitlines())) <= 120, plain
+                    assert '\x1b[1m' in result.stdout and '\x1b[4m' in result.stdout
+                    assert '\x1b[90m' in result.stdout
+                    assert '\x1b[34m' in result.stdout or '\x1b[35m' in result.stdout
+                    if topic:
+                        assert '\x1b[32m' in result.stdout
+                    else:
+                        assert '\x1b[36m' in result.stdout
+                    if len(topic) == 2:
+                        assert 'global' not in plain.lower() and '$HOME' not in plain
+            invalid = [('--help', 'status'), ('unknown', '--help'), ('--version', '--help'),
+                       ('status', '--help', '.'), ('status', '.', '--help', 'extra'),
+                       ('test', '.', '.', '--help'), ('--', '--', '--help'), ('-h',)]
+            invalid += [(command, 'extra', '--help') for command in ('show', 'add', 'edit', 'prev', '.', 'status', 'test')]
+            invalid += [(command, '.', '--help') for command in ('show', 'add', 'edit', 'prev', '.')]
+            for args in invalid:
+                result = run(*args, cwd=help_cwd, code=1, streams=True)
+                assert result.stdout == '' and result.stderr
+                hint = 'fall ' + args[0] if (args[0],) in help_cases else 'fall'
+                assert hint + ' --help' in result.stderr, (args, result.stderr)
+            for leading in ((), ('--',)):
+                result = run(*leading, '--version', cwd=help_cwd, streams=True)
+                assert result.stderr == '' and re.fullmatch(r'\d+\.\d+\.\d+\n', result.stdout)
+            assert snapshot() == before
+        env = saved_env
+
     assert 'repos.conf' in run('test', code=1)
     assert not conf.parent.exists() and not prev.parent.exists()
     repo = home / '한글 repo  '
@@ -136,7 +208,7 @@ with tempfile.TemporaryDirectory(prefix='fall-test-') as temporary:
     conf.unlink()
     run('add', cwd=repo)
     assert '#? /path/to/' in conf.read_text()
-    assert '? to fetch' in run('--help')
+    assert '? to fetch' in run('edit', '--help')
     run('test')
     if os.geteuid() != 0:
         conf.chmod(0)
@@ -394,6 +466,6 @@ with tempfile.TemporaryDirectory(prefix='fall-test-') as temporary:
     assert 'failed: 3' in run('test', '.', cwd=nested, code=1)
     write('# comment\n'*101)
     run('status', code=1)
-    for args in [('status', 'repo'), ('status', '.', 'extra'), ('.', 'status'), ('status', '--help'), ('unknown',)]:
+    for args in [('status', 'repo'), ('status', '.', 'extra'), ('.', 'status'), ('unknown',)]:
         run(*args, code=1)
 print('CLI integration tests passed')

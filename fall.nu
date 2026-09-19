@@ -3,8 +3,9 @@ use codec.nu
 const version = "0.3.0"
 const fetch_start_gap = 100ms
 
-def fail-with-help [message: string] {
-  print --stderr $"(ansi red)($message)(ansi reset)\n\n  (ansi attr_bold)fall --help(ansi reset)  to get help\n"
+def fail-with-help [message: string, topic: string = ""] {
+  let command = if $topic == "" { "fall" } else { $"fall ($topic)" }
+  print --stderr $"(ansi red)($message)(ansi reset)\n\n  (ansi attr_bold)($command) --help(ansi reset)  to get help\n"
   exit 1
 }
 
@@ -305,59 +306,118 @@ def run-checks [items: list, offline: bool] {
     | reduce --fold [] { |item, acc| $acc ++ $item }
 }
 
-def help-message [] {
-  $"(ansi attr_bold)fall(ansi reset) – (ansi attr_bold)(ansi attr_underline)F(ansi reset)etch (ansi attr_bold)(ansi attr_underline)ALL(ansi reset) git repositories
+def help-message [topic: string = ""] {
+  let usage = $"(ansi attr_bold)(ansi attr_underline)Usage(ansi reset)"
+  let fall = $"(ansi attr_bold)fall(ansi reset)"
+  let global = $"$HOME/.config/fall/(ansi blue)repos.conf(ansi reset)"
+  let local = $"(ansi magenta).repos.conf(ansi reset)"
+  let prev = $"$HOME/.local/state/fall/(ansi blue)prev.txt(ansi reset)"
+  match $topic {
+    "" => $"($fall) – (ansi attr_bold)(ansi attr_underline)F(ansi reset)etch (ansi attr_bold)(ansi attr_underline)ALL(ansi reset) git repositories
 
-Run without arguments to fetch enabled repositories in (ansi blue)repos.conf(ansi reset) and display
-its status. (ansi dark_gray)Under the hood,  (ansi attr_bold)fall(ansi reset)  (ansi dark_gray)simply  iterates  over  each  repository  and
-executes
+Run without arguments to fetch enabled repositories and show all statuses.
+Uses ($global); saves results to ($prev).
 
-  (ansi yellow)git fetch && git status(ansi dark_gray)
+($usage)
+  ($fall)            Fetch enabled repositories and show all statuses
+  ($fall) (ansi green)show(ansi reset)       Display the contents of (ansi blue)repos.conf(ansi reset)
+  ($fall) (ansi green)add(ansi reset)        Add the current directory to (ansi blue)repos.conf(ansi reset)
+  ($fall) (ansi green)edit(ansi reset)       Open (ansi blue)repos.conf(ansi reset) in your $EDITOR
+  ($fall) (ansi green)prev(ansi reset)       Show the result of previous ($fall) with datetime
+  ($fall) (ansi green).(ansi reset)          Fetch and show statuses using the nearest ($local)
+  ($fall) (ansi green)status(ansi reset)     Show all statuses without fetching
+  ($fall) (ansi green)test(ansi reset)       Validate the config without state changes
+  ($fall) (ansi cyan)--help(ansi reset)     Show this help message
+  ($fall) (ansi cyan)--version(ansi reset)  Show the program version
 
-(ansi attr_bold)fall(ansi reset) (ansi dark_gray)just makes the process quicker and the output easier to read.(ansi reset)
+(ansi dark_gray)Use(ansi reset) ($fall) (ansi green)<command>(ansi reset) (ansi cyan)--help(ansi reset) (ansi dark_gray)for details, e.g.(ansi reset) ($fall) (ansi green)status(ansi reset) (ansi cyan)--help(ansi reset).
+(ansi dark_gray)Local modes also have help:(ansi reset) ($fall) (ansi green)status .(ansi reset) (ansi cyan)--help(ansi reset), ($fall) (ansi green)test .(ansi reset) (ansi cyan)--help(ansi reset)."
+    "show" => $"($usage)
+  ($fall) (ansi green)show(ansi reset)
 
-(ansi attr_bold)(ansi attr_underline)Usage(ansi reset)
-  (ansi attr_bold)fall(ansi reset)            Fetch enabled repositories and show all statuses
-  (ansi attr_bold)fall(ansi reset) (ansi cyan)--help(ansi reset)     Show this help message
-  (ansi attr_bold)fall(ansi reset) (ansi cyan)--version(ansi reset)  Show the program version
-  (ansi attr_bold)fall(ansi reset) (ansi green)show(ansi reset)       Display the contents of (ansi blue)repos.conf(ansi reset)
-  (ansi attr_bold)fall(ansi reset) (ansi green)add(ansi reset)        Add the current directory to (ansi blue)repos.conf(ansi reset) (ansi dark_gray)\(creates the  file  if
-                  it does not exist)(ansi reset)
-  (ansi attr_bold)fall(ansi reset) (ansi green)edit(ansi reset)       Open (ansi blue)repos.conf(ansi reset) in your $EDITOR (ansi dark_gray)\(creates the file if  it  does
-                  not exist)(ansi reset)
-  (ansi attr_bold)fall(ansi reset) (ansi green)prev(ansi reset)       Show the result of previous (ansi attr_bold)fall(ansi reset) with datetime
-  (ansi attr_bold)fall(ansi reset) (ansi green).(ansi reset)          Use the nearest (ansi magenta).repos.conf(ansi reset) file from  the  current  directory
-                  instead of the global (ansi blue)repos.conf(ansi reset) (ansi dark_gray)\(accepts relative paths, does
-                  not write prev.txt)(ansi reset)
+Display the contents of the global config, with comments in gray.
+File: ($global)
+(ansi dark_gray)The file must already exist; use(ansi reset) ($fall) (ansi green)add(ansi reset) (ansi dark_gray)or(ansi reset) ($fall) (ansi green)edit(ansi reset) (ansi dark_gray)to create it.(ansi reset)"
+    "add" => $"($usage)
+  ($fall) (ansi green)add(ansi reset)
 
-  fall test       Validate the global config without fetch/status or state changes
-  fall test .     Validate the nearest .repos.conf; print its absolute path first
-  fall status     Show all global statuses without fetching; update prev.txt
-  fall status .   Show nearest .repos.conf statuses without fetching or writing prev.txt
+Add the current directory to ($global).
+Creates the config file if it does not exist; escapes spaces in the path.
+Adds an ordinary entry with required fetch and no explicit remote.
+Duplicates are skipped using decoded paths, expanding ~/ regardless of prefix or remote.
+(ansi dark_gray)Existing decoding errors prevent adding an entry.(ansi reset)"
+    "edit" => $"($usage)
+  ($fall) (ansi green)edit(ansi reset)
 
-Prefix a path with ! and one or more ASCII spaces to skip its fetch in normal runs.
-Prefix with ? to fetch and, on fetch failure, warn and continue showing local status.
-Prefixes must start the line and use one or more ASCII spaces, never a tab.
-Empty paths, nested prefixes, and paths starting with ! or ? are unsupported.
-Only fetch failures are tolerated; config, path, and repository validation still applies.
-Ahead/behind counts use locally stored remote-tracking information, possibly stale
-after a failed or skipped fetch. Global runs save warnings and statuses to prev.txt.
-Config syntax: [prefix]path [remote], for example: ? ~/my\\ repo upstream
-Paths escape ASCII spaces with \\ . The first unescaped space separates the remote.
-One registered remote name is allowed, kept literally without whitespace or backslash.
-Repeated ASCII separator spaces and trailing separator spaces are allowed.
-Suffixes are no longer ignored; extra tokens are errors. URLs and remote groups are unsupported.
-Explicit remote uses git fetch -- <remote>; omission keeps Git default fetch selection.
-Remotes are validated even for !, ?, status and test. Status always uses the upstream.
-Backslashes in paths and CR/LF are unsupported. Tabs and quotes are literal.
+Open ($global) in $EDITOR \(default: vi).
+Creates the config file if it does not exist.
+
+(ansi attr_bold)(ansi attr_underline)Config syntax(ansi reset)
+  [prefix]path [remote]
+  ? ~/my\\ repo upstream
+  ! ~/offline-repo
+
+Global paths must be absolute or start with ~/. Escape ASCII spaces with \\ .
+Prefix with ! and ASCII spaces to skip fetch; ? to fetch and show local status on failure.
+An optional registered remote selects what to fetch; status always uses the upstream.
 Blank lines and lines whose first non-whitespace character is # are ignored.
-Global paths must be absolute or start with ~/. Local paths are relative to the config.
-Root and trailing slashes are unsupported. Maximum: 100 lines including comments.
-Test succeeds only when all entries are Git roots and the file has at most 100 lines.
+Maximum: 100 lines including comments. Use ($fall) (ansi green)test(ansi reset) to validate.
+(ansi dark_gray)See README's Config section for all path, prefix, remote, and validation rules.(ansi reset)"
+    "prev" => $"($usage)
+  ($fall) (ansi green)prev(ansi reset)
 
-(ansi attr_bold)(ansi attr_underline)File locations(ansi reset) (ansi dark_gray)– handled automatically, but feel free to edit them yourself(ansi reset)
-  $HOME/.config/fall/(ansi blue)repos.conf(ansi reset)
-  $HOME/.local/state/fall/prev.txt"
+Show the saved result of the previous global run with its age or datetime.
+File: ($prev)
+(ansi dark_gray)Global fetch and status runs save results; local runs do not update this file.(ansi reset)"
+    "." => $"($usage)
+  ($fall) (ansi green).(ansi reset)
+
+Fetch enabled repositories and show statuses using the nearest ($local).
+Searches from the current directory upwards to the filesystem root.
+Paths are relative to the directory containing the selected config.
+Does not save results to (ansi blue)prev.txt(ansi reset).
+(ansi dark_gray)Use(ansi reset) ($fall) (ansi green)status .(ansi reset) (ansi dark_gray)to skip fetch, or(ansi reset) ($fall) (ansi green)test .(ansi reset) (ansi dark_gray)to validate.(ansi reset)"
+    "status" => $"($usage)
+  ($fall) (ansi green)status(ansi reset)
+  ($fall) (ansi green)status .(ansi reset)
+
+Show all statuses without fetching, regardless of fetch prefixes.
+Global mode uses ($global) and saves results to ($prev).
+Local mode uses the nearest ($local) and does not save results.
+(ansi dark_gray)Ahead/behind counts use locally stored remote-tracking information, possibly stale.
+Status follows the branch's upstream, even when a different fetch remote is configured.(ansi reset)
+Use ($fall) (ansi green)status .(ansi reset) (ansi cyan)--help(ansi reset) for local path and discovery rules."
+    "status ." => $"($usage)
+  ($fall) (ansi green)status .(ansi reset)
+
+Show all statuses without fetching, regardless of fetch prefixes.
+Searches from the current directory upwards for the nearest ($local).
+Paths are relative to the directory containing the selected config.
+Does not save results to (ansi blue)prev.txt(ansi reset).
+(ansi dark_gray)Ahead/behind counts use locally stored remote-tracking information, possibly stale.
+Status follows the branch's upstream, even when a different fetch remote is configured.(ansi reset)"
+    "test" => $"($usage)
+  ($fall) (ansi green)test(ansi reset)
+  ($fall) (ansi green)test .(ansi reset)
+
+Validate ($global); use ($fall) (ansi green)test .(ansi reset) for the nearest ($local).
+Checks syntax, paths, Git repository roots, and registered remote names.
+Exit 0: all entries valid and at most 100 lines, including blanks and comments.
+Exit 1: invalid entries, missing/unreadable config, or more than 100 lines.
+Does not fetch, run Git status, or create/change config or state files.
+(ansi dark_gray)Prints diagnostics and checked/succeeded/failed counts; an empty config succeeds.(ansi reset)
+Use ($fall) (ansi green)test .(ansi reset) (ansi cyan)--help(ansi reset) for local path and discovery rules."
+    "test ." => $"($usage)
+  ($fall) (ansi green)test .(ansi reset)
+
+Searches from the current directory upwards for the nearest ($local).
+Prints its absolute path first; entry paths are relative to its directory.
+Checks syntax, paths, Git repository roots, and registered remote names.
+Exit 0: all entries valid and at most 100 lines, including blanks and comments.
+Exit 1: invalid entries, missing/unreadable config, or more than 100 lines.
+Does not fetch, run Git status, or create/change config or state files.
+(ansi dark_gray)Prints diagnostics and checked/succeeded/failed counts; an empty config succeeds.(ansi reset)"
+  }
 }
 
 def --wrapped main [...raw_args] {
@@ -367,13 +427,21 @@ def --wrapped main [...raw_args] {
     $raw_args
   }
 
-  if (($args | length) > 1) and ($args != ["test" "."]) and ($args != ["status" "."]) {
-    fail-with-help $"too many args: ($args | str join ' ')"
+  let commands = ["show" "add" "edit" "prev" "." "status" "test"]
+  let first = ($args | first | default "")
+  let help_topic = ($args | drop | str join " ")
+  if (($args | last | default "") == "--help") and (
+    ($args == ["--help"]) or
+    ((($args | length) == 2) and ($first in $commands)) or
+    ($args == ["status" "." "--help"]) or ($args == ["test" "." "--help"])
+  ) {
+    print (help-message $help_topic)
+    return
   }
 
-  if (($args | length) == 1) and (($args | get 0) == "--help") {
-    print (help-message)
-    return
+  if (($args | length) > 1) and ($args != ["test" "."]) and ($args != ["status" "."]) {
+    let topic = if $first in $commands { $first } else { "" }
+    fail-with-help $"too many args: ($args | str join ' ')" $topic
   }
 
   if (($args | length) == 1) and (($args | get 0) == "--version") {
