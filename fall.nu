@@ -1,6 +1,6 @@
 use codec.nu
 
-const version = "0.3.0"
+const version = "1.0.0"
 const fetch_start_gap = 100ms
 
 def fail-with-help [message: string, topic: string = ""] {

@@ -16,7 +16,7 @@
       packages = forAllSys (pkgs: {
         default = pkgs.stdenvNoCC.mkDerivation {
           pname = "fall";
-          version = "0.3.0";
+          version = "1.0.0";
           src = ./.;
 
           dontUnpack = true;
