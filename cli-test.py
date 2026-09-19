@@ -62,7 +62,7 @@ with tempfile.TemporaryDirectory(prefix='fall-test-') as temporary:
     git('init', '--bare', bare)
     nongit = root / 'nongit'
     nongit.mkdir()
-    write(encode(repo)+' suffix\\unchecked\n'+encode(worktree)+'\n')
+    write(encode(repo)+'   \n'+encode(worktree)+'\n')
     before = conf.read_bytes()
     assert 'succeeded: 2, failed: 0' in run('test')
     assert conf.read_bytes() == before and not prev.parent.exists()
@@ -98,9 +98,9 @@ with tempfile.TemporaryDirectory(prefix='fall-test-') as temporary:
     git('init', ambiguous)
     write(str(ambiguous)+'\n')
     assert 'directory not found' in run('test', code=1)
-    # If the prefix exists, only that prefix is validated.
+    # If the prefix exists, the suffix is validated as a remote name.
     git('init', root/'missing')
-    assert 'succeeded: 1' in run('test')
+    assert 'unregistered remote: suffix' in run('test', code=1)
     project = root / 'project'
     nested = project / 'nested/deep'
     nested.mkdir(parents=True)
@@ -126,7 +126,7 @@ with tempfile.TemporaryDirectory(prefix='fall-test-') as temporary:
     assert 'added' in run('add', cwd=repo)
     assert conf.read_text() == '# comment without final newline\n'+encode(repo)+'\n'
     assert 'duplicate' in run('add', cwd=repo)
-    write('~/'+encode(repo.name)+' ignored suffix\n')
+    write('~/'+encode(repo.name)+' upstream\n')
     assert 'duplicate' in run('add', cwd=repo)
     write('bad\\x\nbad\\\n')
     before = conf.read_bytes()
@@ -149,7 +149,7 @@ with tempfile.TemporaryDirectory(prefix='fall-test-') as temporary:
     run('test', code=1)
     conf.rmdir()
     # Normal execution uses the same codec and 100/101 boundary.
-    write(encode(repo)+' ignored\n'+'# comment\n'*99)
+    write(encode(repo)+'\n'+'# comment\n'*99)
     assert 'clean' in run()
     write(encode(repo)+'\n'+'# comment\n'*100)
     assert 'maximum is 100' in run(code=1)
@@ -172,7 +172,7 @@ with tempfile.TemporaryDirectory(prefix='fall-test-') as temporary:
     git('-C', repo, 'config', f'branch.{branch}.remote', 'origin')
     git('-C', repo, 'config', f'branch.{branch}.merge', 'refs/heads/tracked')
     git('-C', repo, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-m', 'ahead')
-    write(encode(repo)+'\n!   '+encode(worktree)+' ignored suffix\n')
+    write(encode(repo)+'\n!   '+encode(worktree)+'\n')
     calls.write_text('')
     output = run('status')
     log = call_log()
@@ -216,7 +216,7 @@ with tempfile.TemporaryDirectory(prefix='fall-test-') as temporary:
     assert '+1 -0' in output and 'error occurred' not in output
     write(encode(repo)+'\n')
     assert 'error occurred' in run()  # Required fetch failure keeps existing policy.
-    write('! ~/'+encode(repo.name)+' ignored\n')
+    write('! ~/'+encode(repo.name)+' origin\n')
     assert 'succeeded: 1, failed: 0' in run('test')
     before = conf.read_bytes()
     assert 'duplicate' in run('add', cwd=repo)
@@ -229,7 +229,7 @@ with tempfile.TemporaryDirectory(prefix='fall-test-') as temporary:
 
     # Optional failures suppress Git diagnostics, warn on stderr, and retain status.
     warning = f'{repo} fetch failed; showing local status'
-    write('?   '+encode(repo)+' ignored suffix\n')
+    write('?   '+encode(repo)+' origin\n')
     calls.write_text('')
     result = run(streams=True)
     stderr = re.sub(r'\x1b\[[0-9;]*m', '', result.stderr)
@@ -266,6 +266,101 @@ with tempfile.TemporaryDirectory(prefix='fall-test-') as temporary:
     for path in (reachable, repo, required):
         assert any(str(path) in line and ' status --porcelain=v2 --branch' in line for line in log.splitlines()), log
 
+    # Explicit selection fetches exactly one remote while status follows upstream.
+    second_remote = root/'second-remote'
+    git('clone', '--bare', remote, second_remote)
+    git('-C', reachable, 'remote', 'add', 'upstream', second_remote)
+    git('-C', reachable, 'fetch', 'upstream')
+    git('-C', reachable, 'branch', '--set-upstream-to', f'upstream/{branch}')
+
+    def revision(path, ref):
+        return subprocess.check_output([GIT, '-C', str(path), 'rev-parse', ref], env=env, text=True).strip()
+
+    def fetch_argv():
+        return [event['argv'] for event in map(json.loads, calls.read_text().splitlines())
+                if event['event'] == 'start' and 'fetch' in event['argv']]
+
+    stale = revision(reachable, f'upstream/{branch}')
+    git('-C', repo, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
+        'commit', '--allow-empty', '-m', 'both remotes advance')
+    for destination in (remote, second_remote):
+        git('-C', repo, 'push', destination, f'HEAD:refs/heads/{branch}')
+    latest = revision(repo, 'HEAD')
+    git('-C', reachable, 'config', 'fetch.all', 'true')
+    write(encode(reachable)+'   origin   \n')
+    calls.write_text('')
+    output = run()
+    argv = fetch_argv()
+    assert len(argv) == 1 and argv[0][-3:] == ['fetch', '--', 'origin'], argv
+    assert revision(reachable, f'origin/{branch}') == latest
+    assert revision(reachable, f'upstream/{branch}') == stale
+    assert f'upstream/{branch}' in output and '+0 -1' in output
+
+    git('-C', reachable, 'config', '--unset', 'fetch.all')
+
+    # Omission keeps argument-free fetch and selects the configured upstream.
+    write(encode(reachable)+'\n')
+    calls.write_text('')
+    output = run()
+    argv = fetch_argv()
+    assert len(argv) == 1 and argv[0][-1] == 'fetch', argv
+    assert revision(reachable, f'upstream/{branch}') == latest
+    assert '+0 -2' in output
+
+    # Without a configured upstream Git defaults to origin.
+    git('-C', reachable, 'branch', '--unset-upstream')
+    git('-C', repo, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
+        'commit', '--allow-empty', '-m', 'origin advance')
+    git('-C', repo, 'push', remote, f'HEAD:refs/heads/{branch}')
+    calls.write_text('')
+    run()
+    argv = fetch_argv()
+    assert len(argv) == 1 and argv[0][-1] == 'fetch', argv
+    assert revision(reachable, f'origin/{branch}') == revision(repo, 'HEAD')
+    assert revision(reachable, f'upstream/{branch}') == latest
+
+    # Omission also preserves fetch.all from user Git configuration.
+    git('-C', repo, 'push', second_remote, f'HEAD:refs/heads/{branch}')
+    git('-C', reachable, 'config', 'fetch.all', 'true')
+    calls.write_text('')
+    run()
+    assert fetch_argv()[0][-1] == 'fetch'
+    assert revision(reachable, f'upstream/{branch}') == revision(repo, 'HEAD')
+    git('-C', reachable, 'config', '--unset', 'fetch.all')
+
+    # A registered option-looking name is passed literally as one argument.
+    git('-C', reachable, 'config', 'remote.--literal.url', str(remote))
+    git('-C', reachable, 'config', 'remote.--literal.fetch', f'+refs/heads/*:refs/remotes/literal/*')
+    write(encode(reachable)+' --literal\n')
+    calls.write_text('')
+    assert 'error occurred' not in run()
+    assert fetch_argv()[0][-3:] == ['fetch', '--', '--literal']
+    assert revision(reachable, f'literal/{branch}') == revision(repo, 'HEAD')
+
+    # Missing remote names are config errors in every mode, including offline/local.
+    git('-C', reachable, 'config', 'remotes.group', 'origin upstream')
+    for invalid in ('orig', 'Origin', 'group', str(remote)):
+        for prefix in ('', '? ', '! '):
+            raw = prefix+encode(reachable)+' '+invalid
+            write('# comment\n'+raw+'\n')
+            local_raw = prefix+encode(os.path.relpath(reachable, project))+' '+invalid
+            local.write_text('# comment\n'+local_raw+'\n')
+            for args in ((), ('status',), ('test',), ('.',), ('status', '.'), ('test', '.')):
+                calls.write_text('')
+                output = run(*args, cwd=nested, code=int(args[:1] == ('test',)))
+                selected, original = (local, local_raw) if '.' in args else (conf, raw)
+                assert f'{selected}:2: [{original}]: unregistered remote: {invalid}' in output, output
+                assert not fetch_argv() and ' status' not in call_log()
+                assert 'fetch failed' not in output
+
+    # Old ignored suffixes now fail syntax validation and never execute the row.
+    for suffix in ('origin extra', 'origin\\bad', 'origin\tbad'):
+        write(encode(reachable)+' '+suffix+'\n')
+        calls.write_text('')
+        assert 'failed: 1' in run('test', code=1)
+        run()
+        assert not fetch_argv() and ' status' not in call_log()
+
     for args in [('status',), ('status', '.')]:
         write('? '+encode(repo)+'\n! '+encode(reachable)+'\n'+encode(required)+'\n')
         local.write_text('? '+encode(os.path.relpath(repo, project))+'\n! '+encode(os.path.relpath(reachable, project))+'\n'+encode(os.path.relpath(required, project))+'\n')
@@ -279,7 +374,7 @@ with tempfile.TemporaryDirectory(prefix='fall-test-') as temporary:
         else:
             assert all(str(path) in prev.read_text() for path in (repo, reachable, required))
 
-    write('? ~/'+encode(repo.name)+' ignored\n')
+    write('? ~/'+encode(repo.name)+' origin\n')
     calls.write_text('')
     assert 'succeeded: 1, failed: 0' in run('test')
     before = conf.read_bytes()

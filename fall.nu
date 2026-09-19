@@ -114,7 +114,14 @@ def config-items [file: string, config: record, local: bool, root: string, home:
       let decoded = (codec decode $entry.raw)
       let repo = (resolve-repo $decoded.path $local $root $home)
       require-git-root $repo
-      {valid: true, path: $repo, fetch_mode: $decoded.fetch_mode, events: []}
+      if $decoded.remote != null {
+        let remotes = (^git -C $repo remote | complete)
+        if $remotes.exit_code != 0 { error make {msg: "could not list Git remotes"} }
+        if not ($decoded.remote in ($remotes.stdout | lines)) {
+          error make {msg: $"unregistered remote: ($decoded.remote)"}
+        }
+      }
+      {valid: true, path: $repo, fetch_mode: $decoded.fetch_mode, remote: $decoded.remote, events: []}
     } catch { |err|
       {valid: false, path: "", events: [(event "err" (diagnostic $file $entry $err.msg))]}
     }
@@ -163,7 +170,7 @@ def ensure-config-file [dir: string, file: string] {
   mkdir $dir
 
   if not (path-is-file $file) {
-    "# Write one path per line. Use absolute paths.
+    "# Write [prefix]path [remote] per line. Use absolute paths.
 # Starting with # means comments.
 #/path/to/repo
 # Prefix a path with ! and ASCII spaces to skip fetch for that repository.
@@ -175,7 +182,11 @@ def ensure-config-file [dir: string, file: string] {
 
 # You cannot use $HOME. Use ~ instead.
 #~/cool\\ stuff
-# Escape ASCII spaces with \\ . The first unescaped space starts an ignored suffix.
+# Escape path ASCII spaces with \\ . Optionally append one registered remote name.
+#? ~/my\\ repo upstream
+# Remote names are literal: no whitespace or backslash. Extra tokens are errors.
+# Suffixes are no longer ignored. Omit remote to keep Git default fetch selection.
+# Remotes are validated even for !, ?, status and test; status uses the upstream.
 # Backslashes in paths and CR/LF are unsupported. Run fall test to validate.
 " | save --force $file
   }
@@ -210,7 +221,7 @@ def git-options [] {
   }
 }
 
-def dirtycheck [repo: string, fetch: bool, fetch_mode: string] {
+def dirtycheck [repo: string, fetch: bool, fetch_mode: string, remote: any] {
   let git_options = (git-options)
 
   let inside = (^git ...$git_options -C $repo rev-parse --is-inside-work-tree | complete)
@@ -220,7 +231,8 @@ def dirtycheck [repo: string, fetch: bool, fetch_mode: string] {
 
   mut events = []
   if $fetch {
-    let result = (^git ...$git_options -C $repo fetch | complete)
+    let fetch_args = if $remote == null { [] } else { ["--" $remote] }
+    let result = (^git ...$git_options -C $repo fetch ...$fetch_args | complete)
     if ($result.exit_code != 0) and ($fetch_mode == "optional") {
       $events = [(event "err" $"($repo) (ansi yellow)fetch failed; showing local status(ansi reset)")]
     } else {
@@ -283,7 +295,7 @@ def run-checks [items: list, offline: bool] {
     | par-each --keep-order --threads 4 { |item|
         let events = if $item.valid {
           if $item.fetch { sleep $item.delay }
-          dirtycheck $item.path $item.fetch $item.fetch_mode
+          dirtycheck $item.path $item.fetch $item.fetch_mode $item.remote
         } else {
           $item.events
         }
@@ -330,7 +342,13 @@ Empty paths, nested prefixes, and paths starting with ! or ? are unsupported.
 Only fetch failures are tolerated; config, path, and repository validation still applies.
 Ahead/behind counts use locally stored remote-tracking information, possibly stale
 after a failed or skipped fetch. Global runs save warnings and statuses to prev.txt.
-Paths escape ASCII spaces with \\ . The first unescaped space starts an ignored suffix.
+Config syntax: [prefix]path [remote], for example: ? ~/my\\ repo upstream
+Paths escape ASCII spaces with \\ . The first unescaped space separates the remote.
+One registered remote name is allowed, kept literally without whitespace or backslash.
+Repeated ASCII separator spaces and trailing separator spaces are allowed.
+Suffixes are no longer ignored; extra tokens are errors. URLs and remote groups are unsupported.
+Explicit remote uses git fetch -- <remote>; omission keeps Git default fetch selection.
+Remotes are validated even for !, ?, status and test. Status always uses the upstream.
 Backslashes in paths and CR/LF are unsupported. Tabs and quotes are literal.
 Blank lines and lines whose first non-whitespace character is # are ignored.
 Global paths must be absolute or start with ~/. Local paths are relative to the config.

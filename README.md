@@ -146,7 +146,7 @@ The global repo list is located at `~/.config/fall/repos.conf`
 
 # You can use ~ for $HOME
 ~/foo/bar
-~/cool\ stuff  optional ignored suffix
+~/cool\ stuff upstream
 ! ~/offline\ repo
 ? ~/occasionally-unreachable\ repo
 ```
@@ -174,13 +174,27 @@ and statuses to `prev.txt`; local runs leave it unchanged.
 more ASCII spaces; all separator spaces are consumed before decoding the path.
 Bare prefixes, `!repo`, `?repo`, and prefixes immediately followed by a tab are
 errors. Empty paths, nested prefixes, and paths beginning with `!` or `?` are
-unsupported. Suffixes are ignored, not remote names. Optional mode tolerates only
+unsupported. Optional mode tolerates only
 fetch failures; configuration, path, and repository validation still applies.
 The existing process exit code policy is unchanged.
 
+Each entry uses `[prefix]path [remote]`, for example `? ~/my\ repo upstream`.
+The optional remote must exactly match one name listed by `git remote` in that
+repository. It is read and written literally, without escaping or unescaping;
+whitespace and backslashes are forbidden. Repeated ASCII spaces between fields
+and trailing separator spaces are allowed. Extra tokens are errors.
+
+An explicit remote runs `git fetch -- <remote>`. Multiple remotes, direct URLs,
+and remote groups are unsupported. Omitting the remote preserves the existing
+argument-free `git fetch`, including Git's upstream/default remote selection and
+`fetch.all` setting. Status and ahead/behind counts always use the branch's
+upstream, even when fetching a different remote. Remote validation also applies
+to `!` and `?` entries, `fall status`, and `fall test`; an unregistered remote is
+a configuration error and that entry is not executed.
+
 Paths use a strict codec: escape each ASCII space as `\ `, including repeated,
-leading, and trailing spaces. The first unescaped ASCII space ends the path;
-everything after it is ignored. Tabs and quotes are literal path characters,
+leading, and trailing spaces. The first unescaped ASCII space ends the path and
+separates the optional remote. Tabs and quotes are literal path characters,
 not quoting syntax. Backslashes in paths, other escapes, a dangling backslash,
 empty paths, and CR/LF input are errors. Use LF line endings.
 
@@ -193,8 +207,8 @@ unsupported. `$HOME` is not expanded.
 `fall test` validates the global config; `fall test .` searches upwards for the
 nearest `.repos.conf` and prints `.repos.conf at: <absolute path>` first.
 Validation checks decoding, path rules, directory existence, and Git repository
-roots in order, skipping dependent checks on a failed entry but continuing with
-all remaining entries. Normal repositories and worktrees are accepted;
+roots, then registered remote names in order, skipping dependent checks on a
+failed entry but continuing with all remaining entries. Normal repositories and worktrees are accepted;
 repository subdirectories and bare repositories are rejected.
 
 Validation exits **0 only if every entry is valid and the entire file has at
@@ -207,20 +221,21 @@ Normal execution uses the same 100-line limit and path rules.
 Validation never fetches, runs Git status, creates or changes config files, or
 writes `prev.txt`. A missing-directory error includes a conditional reminder
 about escaping spaces; it never retries the whole line as an alternative path.
-`fall add` creates ordinary entries with required fetch and checks duplicates using decoded
-paths regardless of fetch mode. Any
+`fall add` creates ordinary entries with required fetch and no remote, and checks duplicates using decoded
+paths regardless of fetch mode or remote. Any
 existing decoding errors are all reported and prevent adding an entry.
 
 There is no legacy syntax compatibility or automatic migration. Update existing
-space-containing paths to use `\ ` before running `fall`.
+space-containing paths to use `\ ` before running `fall`. Suffixes are no longer
+ignored: remove old suffix text or replace it with one registered remote name.
 
 ## Tests
 
 ```sh
 nu codec-test.nu
-python3 cli-test.py
+nix shell --inputs-from . nixpkgs#python3 -c python3 cli-test.py
 nix build
-python3 cli-test.py ./result/bin/fall
+nix shell --inputs-from . nixpkgs#python3 -c python3 cli-test.py ./result/bin/fall
 ```
 
 The CLI suite uses temporary configurations and repositories, including a
