@@ -25,6 +25,7 @@ multiple git repositories.
 - Commands to view, add, or edit the repo list, and to see previous results.
 - Supports _local mode_ (`fall .`) which uses the nearest `.repos.conf`.
 - Supports offline status checks and skipping fetch for individual repositories.
+- Can continue with local status when an optional fetch fails.
 
 ## Prerequisites
 
@@ -147,6 +148,7 @@ The global repo list is located at `~/.config/fall/repos.conf`
 ~/foo/bar
 ~/cool\ stuff  optional ignored suffix
 ! ~/offline\ repo
+? ~/occasionally-unreachable\ repo
 ```
 
 You can also create as many local repo lists as you want, wherever you want.
@@ -160,10 +162,21 @@ path/to/repo
 ```
 
 Prefix a line with `! ` to skip fetch for that repository in normal runs while
-still showing its status. `!` must be the first character and followed by one or
+still showing its status. Prefix with `? ` to attempt fetch normally but continue
+with local status if fetch fails. Failed optional fetch output is replaced by a
+yellow warning on stderr: `<path> fetch failed; showing local status`. After a
+failed fetch, ahead/behind counts use locally stored remote-tracking information,
+which may be stale. Successful fetches keep their usual output and status behavior.
+Both status commands skip fetch for all three modes. Global runs save warnings
+and statuses to `prev.txt`; local runs leave it unchanged.
+
+`!` or `?` must be the first character and followed by one or
 more ASCII spaces; all separator spaces are consumed before decoding the path.
-`!`, `!repo`, and `!` immediately followed by a tab are errors. Empty paths and
-paths beginning with `!` are unsupported. Suffixes are ignored, not remote names.
+Bare prefixes, `!repo`, `?repo`, and prefixes immediately followed by a tab are
+errors. Empty paths, nested prefixes, and paths beginning with `!` or `?` are
+unsupported. Suffixes are ignored, not remote names. Optional mode tolerates only
+fetch failures; configuration, path, and repository validation still applies.
+The existing process exit code policy is unchanged.
 
 Paths use a strict codec: escape each ASCII space as `\ `, including repeated,
 leading, and trailing spaces. The first unescaped ASCII space ends the path;
@@ -194,7 +207,7 @@ Normal execution uses the same 100-line limit and path rules.
 Validation never fetches, runs Git status, creates or changes config files, or
 writes `prev.txt`. A missing-directory error includes a conditional reminder
 about escaping spaces; it never retries the whole line as an alternative path.
-`fall add` creates entries with fetch enabled and checks duplicates using decoded
+`fall add` creates ordinary entries with required fetch and checks duplicates using decoded
 paths regardless of fetch mode. Any
 existing decoding errors are all reported and prevent adding an entry.
 

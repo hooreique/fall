@@ -168,6 +168,9 @@ def ensure-config-file [dir: string, file: string] {
 #/path/to/repo
 # Prefix a path with ! and ASCII spaces to skip fetch for that repository.
 #! /path/to/offline-repo
+# Prefix with ? and ASCII spaces to fetch but show local status on fetch failure.
+#? /path/to/occasionally-unreachable-repo
+# After fetch failure, ahead/behind counts use locally stored information.
 # fall status skips all fetches; fall status . uses the nearest .repos.conf.
 
 # You cannot use $HOME. Use ~ instead.
@@ -207,7 +210,7 @@ def git-options [] {
   }
 }
 
-def dirtycheck [repo: string, fetch: bool] {
+def dirtycheck [repo: string, fetch: bool, fetch_mode: string] {
   let git_options = (git-options)
 
   let inside = (^git ...$git_options -C $repo rev-parse --is-inside-work-tree | complete)
@@ -218,10 +221,14 @@ def dirtycheck [repo: string, fetch: bool] {
   mut events = []
   if $fetch {
     let result = (^git ...$git_options -C $repo fetch | complete)
-    $events = ((text-to-events "out" $result.stdout) ++ (text-to-events "err" $result.stderr))
-    if $result.exit_code != 0 {
-      $events = ($events ++ [(event "err" $"($repo) (ansi red)error occurred(ansi dark_gray); Try again later.(ansi reset)")])
-      return $events
+    if ($result.exit_code != 0) and ($fetch_mode == "optional") {
+      $events = [(event "err" $"($repo) (ansi yellow)fetch failed; showing local status(ansi reset)")]
+    } else {
+      $events = ((text-to-events "out" $result.stdout) ++ (text-to-events "err" $result.stderr))
+      if $result.exit_code != 0 {
+        $events = ($events ++ [(event "err" $"($repo) (ansi red)error occurred(ansi dark_gray); Try again later.(ansi reset)")])
+        return $events
+      }
     }
   }
 
@@ -263,6 +270,7 @@ def run-checks [items: list, offline: bool] {
     let fetch = if $item.valid {
       match $item.fetch_mode {
         "required" => (not $offline)
+        "optional" => (not $offline)
         "skip" => false
         _ => { error make {msg: $"unsupported fetch mode: ($item.fetch_mode)"} }
       }
@@ -275,7 +283,7 @@ def run-checks [items: list, offline: bool] {
     | par-each --keep-order --threads 4 { |item|
         let events = if $item.valid {
           if $item.fetch { sleep $item.delay }
-          dirtycheck $item.path $item.fetch
+          dirtycheck $item.path $item.fetch $item.fetch_mode
         } else {
           $item.events
         }
@@ -316,8 +324,12 @@ executes
   fall status .   Show nearest .repos.conf statuses without fetching or writing prev.txt
 
 Prefix a path with ! and one or more ASCII spaces to skip its fetch in normal runs.
-The separator cannot be a tab. Empty paths and paths starting with ! are unsupported.
-Ahead/behind counts use locally stored remote-tracking information.
+Prefix with ? to fetch and, on fetch failure, warn and continue showing local status.
+Prefixes must start the line and use one or more ASCII spaces, never a tab.
+Empty paths, nested prefixes, and paths starting with ! or ? are unsupported.
+Only fetch failures are tolerated; config, path, and repository validation still applies.
+Ahead/behind counts use locally stored remote-tracking information, possibly stale
+after a failed or skipped fetch. Global runs save warnings and statuses to prev.txt.
 Paths escape ASCII spaces with \\ . The first unescaped space starts an ignored suffix.
 Backslashes in paths and CR/LF are unsupported. Tabs and quotes are literal.
 Blank lines and lines whose first non-whitespace character is # are ignored.
