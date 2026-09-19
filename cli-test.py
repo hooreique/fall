@@ -39,11 +39,11 @@ with tempfile.TemporaryDirectory(prefix='fall-test-') as temporary:
     def git(*args):
         subprocess.run([GIT, *map(str, args)], env=env, check=True, capture_output=True)
 
-    def run(*args, cwd=root, code=0):
-        result = subprocess.run([*COMMAND, *args], cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        output = re.sub(r'\x1b\[[0-9;]*m', '', result.stdout)
+    def run(*args, cwd=root, code=0, streams=False):
+        result = subprocess.run([*COMMAND, *args], cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        output = re.sub(r'\x1b\[[0-9;]*m', '', result.stdout + result.stderr)
         assert result.returncode == code, (args, result.returncode, output)
-        return output
+        return result if streams else output
 
     def write(content):
         conf.parent.mkdir(parents=True, exist_ok=True)
@@ -135,6 +135,8 @@ with tempfile.TemporaryDirectory(prefix='fall-test-') as temporary:
     assert conf.read_bytes() == before
     conf.unlink()
     run('add', cwd=repo)
+    assert '#? /path/to/' in conf.read_text()
+    assert '? to fetch' in run('--help')
     run('test')
     if os.geteuid() != 0:
         conf.chmod(0)
@@ -224,6 +226,77 @@ with tempfile.TemporaryDirectory(prefix='fall-test-') as temporary:
     before = conf.read_bytes()
     run('add', cwd=repo, code=1)
     assert conf.read_bytes() == before
+
+    # Optional failures suppress Git diagnostics, warn on stderr, and retain status.
+    warning = f'{repo} fetch failed; showing local status'
+    write('?   '+encode(repo)+' ignored suffix\n')
+    calls.write_text('')
+    result = run(streams=True)
+    stderr = re.sub(r'\x1b\[[0-9;]*m', '', result.stderr)
+    assert stderr == warning+'\n', result
+    assert '\x1b[33mfetch failed;' in result.stderr
+    assert '+1 -0' in result.stdout and 'error occurred' not in result.stdout
+    log = call_log()
+    assert any(str(repo) in line and ' fetch' in line for line in log.splitlines()), log
+    assert any(str(repo) in line and ' status --porcelain=v2 --branch' in line for line in log.splitlines()), log
+    assert warning in prev.read_text() and '+1 -0' in prev.read_text()
+    assert '\x1b' not in prev.read_text() and 'fatal:' not in prev.read_text()
+    before, stamp = prev.read_bytes(), prev.stat().st_mtime_ns
+    local.write_text('? '+encode(os.path.relpath(repo, project))+'\n')
+    assert warning in run('.', cwd=nested)
+    assert prev.read_bytes() == before and prev.stat().st_mtime_ns == stamp
+
+    # All three modes coexist; optional success actually updates tracking refs.
+    remote = root/'reachable-remote'
+    git('clone', '--bare', repo, remote)
+    reachable = root/'reachable'
+    git('clone', remote, reachable)
+    git('-C', repo, 'push', remote, f'HEAD:refs/heads/{branch}')
+    git('-C', repo, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-m', 'remote advance')
+    git('-C', repo, 'push', remote, f'HEAD:refs/heads/{branch}')
+    write('? '+encode(reachable)+'\n! '+encode(repo)+'\n'+encode(required)+'\n')
+    calls.write_text('')
+    output = run()
+    log = call_log()
+    assert '+0 -1' in output and 'fetch failed' not in output and 'error occurred' not in output
+    assert ' -> origin/' in output  # Successful fetch output remains visible.
+    for path in (reachable, required):
+        assert any(str(path) in line and ' fetch' in line for line in log.splitlines()), log
+    assert not any(str(repo) in line and ' fetch' in line for line in log.splitlines()), log
+    for path in (reachable, repo, required):
+        assert any(str(path) in line and ' status --porcelain=v2 --branch' in line for line in log.splitlines()), log
+
+    for args in [('status',), ('status', '.')]:
+        write('? '+encode(repo)+'\n! '+encode(reachable)+'\n'+encode(required)+'\n')
+        local.write_text('? '+encode(os.path.relpath(repo, project))+'\n! '+encode(os.path.relpath(reachable, project))+'\n'+encode(os.path.relpath(required, project))+'\n')
+        before, stamp = prev.read_bytes(), prev.stat().st_mtime_ns
+        calls.write_text('')
+        output = run(*args, cwd=nested)
+        assert ' fetch' not in call_log() and 'fetch failed' not in output
+        assert all(str(path) in output for path in (repo, reachable, required))
+        if len(args) == 2:
+            assert prev.read_bytes() == before and prev.stat().st_mtime_ns == stamp
+        else:
+            assert all(str(path) in prev.read_text() for path in (repo, reachable, required))
+
+    write('? ~/'+encode(repo.name)+' ignored\n')
+    calls.write_text('')
+    assert 'succeeded: 1, failed: 0' in run('test')
+    before = conf.read_bytes()
+    assert 'duplicate' in run('add', cwd=repo)
+    assert conf.read_bytes() == before
+    assert ' fetch' not in call_log() and ' status' not in call_log()
+    write('?repo\n?\tbad\n? \n? ! repo\n! ? repo\n? '+encode(sub)+'\n? '+encode(bare)+'\n? '+encode(nongit)+'\n? '+encode(root/'absent')+'\n? relative\n')
+    calls.write_text('')
+    assert 'failed: 10' in run('test', code=1)
+    output = run()
+    assert 'fetch failed' not in output and 'directory not found' in output
+    assert ' fetch' not in call_log() and ' status' not in call_log()
+    before = conf.read_bytes()
+    run('add', cwd=repo, code=1)
+    assert conf.read_bytes() == before
+    local.write_text('? /absolute\n? ~/home\n? repo/\n')
+    assert 'failed: 3' in run('test', '.', cwd=nested, code=1)
     write('# comment\n'*101)
     run('status', code=1)
     for args in [('status', 'repo'), ('status', '.', 'extra'), ('.', 'status'), ('status', '--help'), ('unknown',)]:
