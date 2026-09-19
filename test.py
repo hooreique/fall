@@ -19,7 +19,8 @@ def encode(path):
 
 
 with tempfile.TemporaryDirectory(prefix='fall-test-') as temporary:
-    root = Path(temporary)
+    # Match the physical cwd reported by Nushell (macOS temp paths use /var aliases).
+    root = Path(temporary).resolve()
     home = root / 'home'
     home.mkdir()
     env = {**os.environ, 'HOME': str(home), 'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': '/dev/null'}
@@ -63,7 +64,7 @@ with tempfile.TemporaryDirectory(prefix='fall-test-') as temporary:
         ('test', '.'): ('absolute path first', 'relative', 'Exit 0', 'Exit 1', '100 lines', 'config or state files'),
     }
     with tempfile.TemporaryDirectory(prefix='fall-help-') as help_temporary:
-        help_root = Path(help_temporary)
+        help_root = Path(help_temporary).resolve()
         help_home = help_root / 'home'
         help_home.mkdir()
         help_cwd = help_root / 'project/nested'
