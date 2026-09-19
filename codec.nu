@@ -1,13 +1,13 @@
 # Only path ASCII spaces are escaped; optional remote and branch fields are kept verbatim.
 def validate-remote [remote: string] {
-  if ($remote == "") or ($remote | str contains '\') or ($remote =~ '\s') {
-    error make {msg: 'remote must be nonempty and cannot contain whitespace or backslash'}
+  if ($remote == "") or ($remote | str starts-with "#") or ($remote | str contains '\') or ($remote =~ '\s') {
+    error make {msg: 'remote must be nonempty, cannot start with #, and cannot contain whitespace or backslash'}
   }
 }
 
 def validate-branch [branch: string] {
-  if ($branch == "") or ($branch | str contains '\') or ($branch =~ '\s') {
-    error make {msg: 'remote-branch must be nonempty and cannot contain whitespace or backslash'}
+  if ($branch == "") or ($branch | str starts-with "#") or ($branch | str contains '\') or ($branch =~ '\s') {
+    error make {msg: 'remote-branch must be nonempty, cannot start with #, and cannot contain whitespace or backslash'}
   }
 }
 
@@ -74,7 +74,7 @@ export def decode [text: string] {
   }
   if $path == "" { error make {msg: "empty path"} }
   if ($path | str starts-with '!') or ($path | str starts-with '?') { error make {msg: "path cannot start with ! or ?"} }
-  let tokens = ($suffix | split row ' ' | where { |token| $token != "" })
+  let tokens = ($suffix | split row ' ' | where { |token| $token != "" } | take while { |token| not ($token | str starts-with "#") })
   if ($tokens | length) > 2 { error make {msg: "expected path [remote [remote-branch]]; extra tokens are unsupported"} }
   let remote = if ($tokens | is-empty) { null } else { $tokens | first }
   if $remote != null { validate-remote $remote }

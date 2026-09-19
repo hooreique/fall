@@ -176,7 +176,10 @@ def ensure-config-file [dir: string, file: string] {
 
   if not (path-is-file $file) {
     "# Write [prefix]path [remote [remote-branch]] per line. Use absolute paths.
-# Starting with # means comments.
+# Starting with # means comments. After the path, a token starting with # comments out the rest.
+#/path/to/repo # description
+#/path/to/repo origin #description
+#/path/to/repo origin main # description
 #/path/to/repo
 # Prefix a path with ! and ASCII spaces to skip fetch for that repository.
 #! /path/to/offline-repo
@@ -189,10 +192,11 @@ def ensure-config-file [dir: string, file: string] {
 #~/cool\\ stuff
 # Escape path ASCII spaces with \\ . Optionally append one registered remote name.
 #? ~/my\\ repo upstream
-# Remote and branch are literal: no whitespace or backslash. A fourth field is an error.
+# Remote and branch cannot start with # or contain whitespace or backslash.
+# A fourth field before a comment is an error.
 #? ~/repo origin main
 # With a branch, compare HEAD to refs/remotes/<remote>/<remote-branch>.
-# Suffixes are no longer ignored. Omit remote to keep Git default fetch selection.
+# Omit remote to keep Git default fetch selection.
 # Remotes are validated even for !, ?, status and test; omit branch to use the upstream.
 # Backslashes in paths and CR/LF are unsupported. Run fall test to validate.
 " | save --force $file
@@ -387,14 +391,15 @@ Creates the config file if it does not exist.
 
 (ansi attr_bold)(ansi attr_underline)Config syntax(ansi reset)
   [prefix]path [remote [remote-branch]]
-  ? ~/my\\ repo upstream
-  ! ~/offline-repo
+  ? ~/my\\ repo upstream # fetch upstream
+  ! ~/offline-repo # skip fetch
 
 Global paths must be absolute or start with ~/. Escape ASCII spaces with \\ .
 Prefix with ! and ASCII spaces to skip fetch; ? to fetch and show local status on failure.
 A registered remote selects what to fetch; an optional branch selects what to compare with HEAD.
 Omit branch to use the upstream. Fields are positional: path main means remote main.
 Blank lines and lines whose first non-whitespace character is # are ignored.
+After the path, a token starting with # comments out the rest; # inside a field stays literal.
 Maximum: 100 lines including comments. Use ($fall) (ansi green)test(ansi reset) to validate.
 (ansi dark_gray)See README's Config section for all path, prefix, remote, and validation rules.(ansi reset)"
     "prev" => $"($usage)

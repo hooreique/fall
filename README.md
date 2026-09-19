@@ -196,11 +196,26 @@ Each entry uses `[prefix]path [remote [remote-branch]]`, for example `? ~/my\ re
 The optional remote must exactly match one name listed by `git remote` in that
 repository. It is read and written literally, without escaping or unescaping;
 whitespace and backslashes are forbidden. Repeated ASCII spaces between fields
-and trailing separator spaces are allowed. A fourth field is a syntax error.
+and trailing separator spaces are allowed. A fourth field before any inline comment is a syntax error.
 Fields are strictly positional: `path main` selects remote `main` and fails if
 that remote is unregistered; it never means branch `main`.
 The optional third field is a literal branch name without whitespace or backslashes,
 validated with `git check-ref-format refs/heads/<branch>`.
+
+After the path, the first ASCII-space-separated token starting with `#` begins
+an inline comment; everything from that token to the end of the line is ignored.
+This works in both global and local configs, with or without `!` or `?`:
+
+```plaintext
+path # description
+path origin #description
+path origin main # description
+```
+
+A `#` in a path or inside a field (such as `repo#1` or `origin#1`) stays literal.
+Remote and branch values cannot start with `#`. Backslashes and tabs inside
+comments are ignored; invalid or extra fields before the comment still fail.
+Blank lines and lines whose first non-whitespace character is `#` are ignored.
 
 An explicit remote runs `git fetch -- <remote>`. Multiple remotes, direct URLs,
 and remote groups are unsupported. Omitting the remote preserves the existing
