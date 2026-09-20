@@ -10,7 +10,13 @@
 stdenvNoCC.mkDerivation {
   pname = "fall";
   version = "1.0.0";
-  src = ./.;
+  src = lib.fileset.toSource {
+    root = ./.;
+    fileset = lib.fileset.unions [
+      ./fall.nu
+      ./codec.nu
+    ];
+  };
 
   dontUnpack = true;
   nativeBuildInputs = [ makeWrapper ];
