@@ -33,6 +33,9 @@ nix profile install github:hooreique/fall
 
 ## Home Manager flake example
 
+The `overlays.default` overlay provides `pkgs.fall`, using dependencies from
+the package set it is applied to.
+
 Add `fall` to your flake:
 
 ```nix
@@ -49,7 +52,7 @@ Add `fall` to your flake:
     pkgs = import inputs.nixpkgs {
       inherit system;
       overlays = [
-        (final: prev: { fall = inputs.fall.packages.${system}.default; })
+        inputs.fall.overlays.default
       ];
     };
   in {
